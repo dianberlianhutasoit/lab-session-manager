@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "ppk-sprint1-presensi",
+    "scheme": "lab-session-manager",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.dianberlianhutasoit.ppksprint1presensi"
+      "package": "com.dianberlianhutasoit.labsessionmanager"
     },
     "web": {
       "output": "server",
