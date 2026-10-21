@@ -1,13 +1,14 @@
-import { useRouter, type Href } from "expo-router";
-import { FlatList, SafeAreaView, StatusBar, StyleSheet, Text, View } from "react-native";
-import { schedules, sessions } from "../../data/dummy";
+import { Stack, useRouter, type Href } from "expo-router";
+import { FlatList, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { Schedule, Session } from "../../types";
 import SessionCard from "../../components/praktikan/SessionCard";
+import { useSessionContext } from "../../context/session-context";
 
 type ScheduledSession = { session: Session; schedule: Schedule };
 
 export default function PraktikanJadwalScreen() {
   const router = useRouter();
+  const { schedules, sessions } = useSessionContext();
   const scheduledSessions: ScheduledSession[] = sessions.flatMap((session) => {
     const schedule = schedules.find((item) => item.id === session.scheduleId);
     return schedule ? [{ session, schedule }] : [];
@@ -16,6 +17,16 @@ export default function PraktikanJadwalScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
+      <Stack.Screen
+        options={{
+          title: "Jadwal Praktikum",
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push("/praktikan/riwayat" as Href)}>
+              <Text style={styles.historyButton}>Riwayat</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <View style={styles.container}>
         <View style={styles.headerContainer}>
           <Text style={styles.headerTitle}>Jadwal Praktikum</Text>
@@ -53,4 +64,5 @@ const styles = StyleSheet.create({
   listContainer: { paddingHorizontal: 20, paddingBottom: 24 },
   emptyContainer: { padding: 20, alignItems: "center" },
   emptyText: { color: "#6272A4", fontSize: 14, fontStyle: "italic" },
+  historyButton: { color: "#8BE9FD", fontSize: 14, fontWeight: "600", paddingHorizontal: 12 },
 });

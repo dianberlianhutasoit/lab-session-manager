@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback, useRef } from 'react';
 import {
   users as initialUsers,
   schedules as initialSchedules,
@@ -24,6 +24,7 @@ interface SessionContextValue {
   openSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
   toggleSessionStatus: (sessionId: string) => void;
+  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => boolean;
   // Helper queries
   getScheduleById: (scheduleId: string) => Schedule | undefined;
   getAssistantById: (assistantId: string) => User | undefined;
@@ -40,7 +41,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [schedules] = useState<Schedule[]>(initialSchedules);
   const [users] = useState<User[]>(initialUsers);
-  const [attendance] = useState<Attendance[]>(initialAttendance);
+  const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const attendanceRef = useRef<Attendance[]>(initialAttendance);
   const [currentAssistantId, setCurrentAssistantId] = useState<string>('user-asisten-001');
 
   // SRS-06: Membuka sesi praktikum
@@ -69,6 +71,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       })
     );
   }, []);
+
+  const recordAttendance = useCallback(
+    (sessionId: string, userId: string, recordedAt: string): boolean => {
+      const alreadyRecorded = attendanceRef.current.some(
+        (record) => record.sessionId === sessionId && record.userId === userId
+      );
+      if (alreadyRecorded) return false;
+
+      const nextAttendance = [
+        ...attendanceRef.current,
+        {
+          id: `attendance-${sessionId}-${userId}`,
+          sessionId,
+          userId,
+          recordedAt,
+        },
+      ];
+      attendanceRef.current = nextAttendance;
+      setAttendance(nextAttendance);
+      return true;
+    },
+    []
+  );
 
   const getScheduleById = useCallback(
     (scheduleId: string) => schedules.find((sch) => sch.id === scheduleId),
@@ -129,6 +154,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      recordAttendance,
       getScheduleById,
       getAssistantById,
       getAttendanceCount,
@@ -145,6 +171,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      recordAttendance,
       getScheduleById,
       getAssistantById,
       getAttendanceCount,
