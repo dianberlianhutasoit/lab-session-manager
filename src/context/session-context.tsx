@@ -5,7 +5,7 @@ import {
   sessions as initialSessions,
   attendance as initialAttendance,
 } from '@/data/dummy';
-import type { Attendance, Schedule, Session, SessionStatus, User } from '@/types';
+import type { Attendance, AttendanceRecord, Schedule, Session, SessionStatus, User } from '@/types';
 
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
@@ -29,6 +29,9 @@ interface SessionContextValue {
   getAssistantById: (assistantId: string) => User | undefined;
   getAttendanceCount: (sessionId: string) => number;
   getSessionsWithDetails: () => SessionWithDetails[];
+  // SRS-08: Rekap Presensi Praktikan
+  getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
+  getPractitioners: () => User[];
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -91,6 +94,30 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }));
   }, [sessions, getScheduleById, getAssistantById, getAttendanceCount]);
 
+  // SRS-08: Mengambil seluruh riwayat presensi beserta identitas praktikan pada suatu sesi
+  const getSessionAttendanceRecords = useCallback(
+    (sessionId: string): AttendanceRecord[] => {
+      const records = attendance.filter((a) => a.sessionId === sessionId);
+      return records.map((rec) => {
+        const student = users.find((u) => u.id === rec.userId);
+        return {
+          id: rec.id,
+          sessionId: rec.sessionId,
+          userId: rec.userId,
+          userName: student?.name ?? 'Praktikan Tidak Dikenal',
+          userEmail: student?.email ?? '-',
+          recordedAt: rec.recordedAt,
+        };
+      });
+    },
+    [attendance, users]
+  );
+
+  // SRS-08: Mengambil daftar praktikan terdaftar
+  const getPractitioners = useCallback((): User[] => {
+    return users.filter((u) => u.role === 'praktikan');
+  }, [users]);
+
   const value = useMemo(
     () => ({
       sessions,
@@ -106,6 +133,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getAssistantById,
       getAttendanceCount,
       getSessionsWithDetails,
+      getSessionAttendanceRecords,
+      getPractitioners,
     }),
     [
       sessions,
@@ -120,6 +149,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getAssistantById,
       getAttendanceCount,
       getSessionsWithDetails,
+      getSessionAttendanceRecords,
+      getPractitioners,
     ]
   );
 
