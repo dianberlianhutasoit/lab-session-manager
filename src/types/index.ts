@@ -32,3 +32,13 @@ export interface Attendance {
   userId: string;
   recordedAt: string;
 }
+
+export interface AttendanceRecord {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  recordedAt: string;
+}
+
