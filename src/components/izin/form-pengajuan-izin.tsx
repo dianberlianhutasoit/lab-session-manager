@@ -26,34 +26,56 @@ export function FormPengajuanIzin({
   isLoading = false,
 }: FormPengajuanIzinProps) {
   const theme = useTheme();
-  const { sessions, schedules } = useSessionContext();
+  const { sessions, schedules, permissions, currentStudentId } = useSessionContext();
 
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [reason, setReason] = useState<string>('');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [reasonError, setReasonError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
-  // Validasi form (SRS-15)
+  // Validasi form komprehensif (SRS-15)
   const validateForm = (): boolean => {
+    let isValid = true;
+
+    // 1. Validasi Pemilihan Sesi
     if (!selectedSessionId) {
-      setErrorMessage('Silakan pilih salah satu sesi praktikum.');
-      return false;
+      setSessionError('Silakan pilih salah satu sesi praktikum yang ingin diajukan izin.');
+      isValid = false;
+    } else {
+      // 2. Validasi Pencegahan Izin Ganda pada Sesi yang Sama
+      const hasExistingPendingOrApproved = permissions.some(
+        (p) =>
+          p.sessionId === selectedSessionId &&
+          p.userId === currentStudentId &&
+          p.status !== 'REJECTED'
+      );
+
+      if (hasExistingPendingOrApproved) {
+        setSessionError('Anda sudah pernah mengajukan izin untuk sesi praktikum ini.');
+        isValid = false;
+      } else {
+        setSessionError(null);
+      }
     }
+
+    // 3. Validasi Alasan Ketidakhadiran
     const trimmedReason = reason.trim();
     if (!trimmedReason) {
-      setErrorMessage('Alasan ketidakhadiran tidak boleh kosong.');
-      return false;
-    }
-    if (trimmedReason.length < 10) {
-      setErrorMessage('Alasan terlalu singkat, tuliskan minimal 10 karakter.');
-      return false;
-    }
-    if (trimmedReason.length > 500) {
-      setErrorMessage('Alasan terlalu panjang (maksimal 500 karakter).');
-      return false;
+      setReasonError('Alasan ketidakhadiran tidak boleh kosong.');
+      isValid = false;
+    } else if (trimmedReason.length < 10) {
+      setReasonError('Alasan terlalu singkat, tuliskan minimal 10 karakter.');
+      isValid = false;
+    } else if (trimmedReason.length > 500) {
+      setReasonError('Alasan melebihi batas maksimal (maksimal 500 karakter).');
+      isValid = false;
+    } else {
+      setReasonError(null);
     }
 
-    setErrorMessage(null);
-    return true;
+    setGeneralError(null);
+    return isValid;
   };
 
   const handleSubmit = async () => {
@@ -67,7 +89,9 @@ export function FormPengajuanIzin({
       // Reset form setelah berhasil
       setReason('');
       setSelectedSessionId('');
-      setErrorMessage(null);
+      setSessionError(null);
+      setReasonError(null);
+      setGeneralError(null);
 
       const successTitle = 'Permohonan Terkirim';
       const successMsg = 'Izin Anda telah diajukan dan sedang diproses.';
@@ -78,7 +102,7 @@ export function FormPengajuanIzin({
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Terjadi kesalahan saat mengirim izin.';
-      setErrorMessage(msg);
+      setGeneralError(msg);
     }
   };
 
@@ -115,7 +139,7 @@ export function FormPengajuanIzin({
                 key={sess.id}
                 onPress={() => {
                   setSelectedSessionId(sess.id);
-                  setErrorMessage(null);
+                  setSessionError(null);
                 }}
                 style={[
                   styles.sessionCard,
@@ -159,6 +183,11 @@ export function FormPengajuanIzin({
             );
           })}
         </ScrollView>
+        {sessionError && (
+          <ThemedText type="small" style={styles.fieldError}>
+            ⚠️ {sessionError}
+          </ThemedText>
+        )}
       </View>
 
       {/* 2. Textarea Alasan Izin */}
@@ -183,7 +212,7 @@ export function FormPengajuanIzin({
             {
               color: theme.text,
               backgroundColor: theme.background,
-              borderColor: errorMessage ? '#EF4444' : '#CBD5E1',
+              borderColor: reasonError ? '#EF4444' : '#CBD5E1',
             },
           ]}
           placeholder="Contoh: Saya tidak dapat mengikuti sesi praktikum karena mengalami demam tinggi dan harus menjalani pemeriksaan dokter di RS..."
@@ -194,20 +223,25 @@ export function FormPengajuanIzin({
           value={reason}
           onChangeText={(text) => {
             setReason(text);
-            if (errorMessage) setErrorMessage(null);
+            if (reasonError) setReasonError(null);
           }}
           editable={!isLoading}
         />
+        {reasonError && (
+          <ThemedText type="small" style={styles.fieldError}>
+            ⚠️ {reasonError}
+          </ThemedText>
+        )}
         <ThemedText type="small" themeColor="textSecondary" style={styles.helperText}>
           Minimal 10 karakter. Alasan ini akan diklasifikasikan oleh AI untuk pertimbangan asisten.
         </ThemedText>
       </View>
 
-      {/* Feedback Pesan Validasi Error (SRS-15) */}
-      {errorMessage && (
+      {/* Feedback Pesan Validasi Error Umum (SRS-15) */}
+      {generalError && (
         <View style={styles.errorBox}>
           <ThemedText type="small" style={styles.errorText}>
-            ⚠️ {errorMessage}
+            ⚠️ {generalError}
           </ThemedText>
         </View>
       )}
@@ -349,6 +383,12 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 11,
+  },
+  fieldError: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
   },
   errorBox: {
     backgroundColor: '#FEF2F2',

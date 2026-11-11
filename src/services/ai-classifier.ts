@@ -1,3 +1,5 @@
+import NetInfo from '@react-native-community/netinfo';
+
 import type { PermissionCategory } from '@/types';
 
 export interface AIClassificationResult {
@@ -18,6 +20,19 @@ const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models
 export async function classifyPermissionReason(
   reasonText: string
 ): Promise<AIClassificationResult> {
+  // SRS-15: Cek kondisi offline terlebih dahulu untuk menghindari request sia-sia
+  try {
+    const netState = await NetInfo.fetch();
+    if (netState.isConnected === false) {
+      return {
+        category: 'Unclassified',
+        summary: 'Klasifikasi otomatis dilewati (perangkat offline)',
+      };
+    }
+  } catch {
+    // Abaikan jika pengecekan NetInfo tidak didukung di platform tertentu
+  }
+
   // Batas waktu timeout 5 detik (SRS-13)
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
