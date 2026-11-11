@@ -43,7 +43,7 @@ export interface Schedule {
 }
 
 /**
- * SRS-07: Representasi Sesi Praktikum (collection: sessions)
+ * SRS-07 & SRS-08: Representasi Sesi Praktikum (collection: sessions)
  */
 export interface Session {
   id: string;
@@ -51,8 +51,25 @@ export interface Session {
   scheduleId: string;
   assistantId: string;
   status: SessionStatus;
+  openedAt?: string;
+  closedAt?: string;
+  lastUpdatedBy?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * SRS-08: Catatan Riwayat Perubahan Status Sesi (OPEN / CLOSED)
+ */
+export interface SessionStatusLog {
+  id: string;
+  sessionId: string;
+  previousStatus: SessionStatus;
+  newStatus: SessionStatus;
+  changedBy: string;
+  changedByName: string;
+  isSubstitute?: boolean;
+  changedAt: string;
 }
 
 export interface Attendance {

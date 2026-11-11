@@ -2,7 +2,6 @@ import {
   collection,
   doc,
   setDoc,
-  updateDoc,
   deleteDoc,
   getDocs,
   onSnapshot,
@@ -14,6 +13,7 @@ import {
   classes as initialClasses,
   schedules as initialSchedules,
   sessions as initialSessions,
+  statusLogs as initialStatusLogs,
   attendance as initialAttendance,
   users as initialUsers,
 } from '@/data/dummy';
@@ -23,12 +23,14 @@ import type {
   Schedule,
   Session,
   SessionStatus,
+  SessionStatusLog,
 } from '@/types';
 
 export const COLLECTIONS = {
   CLASSES: 'classes',
   SCHEDULES: 'schedules',
   SESSIONS: 'sessions',
+  STATUS_LOGS: 'session_status_logs',
   ATTENDANCE: 'attendance',
   USERS: 'users',
 } as const;
@@ -112,6 +114,10 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
       );
     }
 
+    for (const log of initialStatusLogs) {
+      batch.set(doc(db, COLLECTIONS.STATUS_LOGS, log.id), stripUndefined(log));
+    }
+
     for (const att of initialAttendance) {
       batch.set(doc(db, COLLECTIONS.ATTENDANCE, att.id), stripUndefined(att));
     }
@@ -158,7 +164,6 @@ export async function firestoreUpdateClass(
     })
   );
 
-  // Sinkronkan courseCode, title, dan className ke dokumen schedules terkait
   const scheduleSyncPayload = stripUndefined({
     courseCode: updates.courseCode,
     title: updates.title,
@@ -258,17 +263,69 @@ export async function firestoreDeleteSessionAndSchedule(
 }
 
 /**
- * Update status sesi (OPEN / CLOSED) di Firestore
+ * SRS-08: Update status sesi (OPEN / CLOSED) beserta metadata waktu & log audit di Firestore
  */
 export async function firestoreUpdateSessionStatus(
   sessionId: string,
-  status: SessionStatus
+  status: SessionStatus,
+  metadata?: {
+    openedAt?: string;
+    closedAt?: string;
+    lastUpdatedBy?: string;
+  },
+  statusLog?: SessionStatusLog
 ): Promise<void> {
   if (!db) return;
-  await updateDoc(doc(db, COLLECTIONS.SESSIONS, sessionId), {
-    status,
-    updatedAt: new Date().toISOString(),
-  });
+  const batch = writeBatch(db);
+  const now = new Date().toISOString();
+
+  batch.update(
+    doc(db, COLLECTIONS.SESSIONS, sessionId),
+    stripUndefined({
+      status,
+      openedAt: metadata?.openedAt,
+      closedAt: metadata?.closedAt,
+      lastUpdatedBy: metadata?.lastUpdatedBy,
+      updatedAt: now,
+    })
+  );
+
+  if (statusLog) {
+    batch.set(doc(db, COLLECTIONS.STATUS_LOGS, statusLog.id), stripUndefined(statusLog));
+  }
+
+  await batch.commit();
+}
+
+/**
+ * SRS-08: Menutup beberapa sesi terbuka sekaligus secara atomik (Batch Close)
+ */
+export async function firestoreBatchCloseSessions(
+  sessionIds: string[],
+  closedAt: string,
+  lastUpdatedBy: string,
+  logs: SessionStatusLog[]
+): Promise<void> {
+  if (!db || sessionIds.length === 0) return;
+  const batch = writeBatch(db);
+
+  for (const sessionId of sessionIds) {
+    batch.update(
+      doc(db, COLLECTIONS.SESSIONS, sessionId),
+      stripUndefined({
+        status: 'CLOSED' as SessionStatus,
+        closedAt,
+        lastUpdatedBy,
+        updatedAt: closedAt,
+      })
+    );
+  }
+
+  for (const log of logs) {
+    batch.set(doc(db, COLLECTIONS.STATUS_LOGS, log.id), stripUndefined(log));
+  }
+
+  await batch.commit();
 }
 
 /**
@@ -278,4 +335,3 @@ export async function firestoreRecordAttendance(record: Attendance): Promise<voi
   if (!db) return;
   await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), stripUndefined(record));
 }
-

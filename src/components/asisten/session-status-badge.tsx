@@ -6,9 +6,14 @@ import type { SessionStatus } from '@/types';
 interface SessionStatusBadgeProps {
   status: SessionStatus;
   size?: 'small' | 'medium';
+  isUpdating?: boolean;
 }
 
-export function SessionStatusBadge({ status, size = 'medium' }: SessionStatusBadgeProps) {
+export function SessionStatusBadge({
+  status,
+  size = 'medium',
+  isUpdating = false,
+}: SessionStatusBadgeProps) {
   const isOpen = status === 'OPEN';
 
   return (
@@ -26,7 +31,11 @@ export function SessionStatusBadge({ status, size = 'medium' }: SessionStatusBad
           isOpen ? styles.textOpen : styles.textClosed,
           size === 'small' && styles.textSmall,
         ]}>
-        {isOpen ? 'SESI DIBUKA' : 'SESI DITUTUP'}
+        {isUpdating
+          ? 'MEMPERBARUI...'
+          : isOpen
+            ? 'SESI DIBUKA (OPEN)'
+            : 'SESI DITUTUP (CLOSED)'}
       </ThemedText>
     </View>
   );
@@ -48,14 +57,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   badgeOpen: {
-    backgroundColor: '#DCFCE7', // Tailwind green-100
+    backgroundColor: '#DCFCE7',
     borderWidth: 1,
-    borderColor: '#86EFAC', // Tailwind green-300
+    borderColor: '#86EFAC',
   },
   badgeClosed: {
-    backgroundColor: '#F1F5F9', // Tailwind slate-100
+    backgroundColor: '#F1F5F9',
     borderWidth: 1,
-    borderColor: '#CBD5E1', // Tailwind slate-300
+    borderColor: '#CBD5E1',
   },
   dot: {
     width: 8,
@@ -63,10 +72,10 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   dotOpen: {
-    backgroundColor: '#16A34A', // Tailwind green-600
+    backgroundColor: '#16A34A',
   },
   dotClosed: {
-    backgroundColor: '#64748B', // Tailwind slate-500
+    backgroundColor: '#64748B',
   },
   text: {
     fontSize: 12,
@@ -76,9 +85,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   textOpen: {
-    color: '#15803D', // Tailwind green-700
+    color: '#15803D',
   },
   textClosed: {
-    color: '#475569', // Tailwind slate-600
+    color: '#475569',
   },
 });
