@@ -16,6 +16,7 @@ import { FormPengajuanIzin } from '@/components/izin/form-pengajuan-izin';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useSessionContext } from '@/context/session-context';
 import { useTheme } from '@/hooks/use-theme';
+import { classifyPermissionReason } from '@/services/ai-classifier';
 
 export default function IzinPraktikanScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -28,14 +29,16 @@ export default function IzinPraktikanScreen() {
   const handleSubmitPermission = async (data: { sessionId: string; reason: string }) => {
     setIsSubmitting(true);
     try {
-      // Catatan: Pada Checklist 2, panggilan AI classifyPermissionReason akan dihubungkan di sini.
-      // Untuk sementara pada Checklist 1, kita simpan dengan default/mock kategori awal.
+      // SRS-12 & SRS-13: Klasifikasi AI via fetch REST API dengan timeout & fallback
+      const aiResult = await classifyPermissionReason(data.reason);
+
       addPermission({
         sessionId: data.sessionId,
         reason: data.reason,
-        category: 'Unclassified',
-        aiAnalysis: 'Menunggu klasifikasi AI...',
+        category: aiResult.category,
+        aiAnalysis: aiResult.summary,
       });
+
       // Pindahkan view ke tab riwayat agar praktikan langsung melihat hasilnya
       setActiveTab('RIWAYAT');
     } finally {
