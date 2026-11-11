@@ -1,14 +1,18 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import PresensiModal from "../../components/praktikan/PresensiModal";
-import { useSessionContext } from "../../context/session-context";
+import { ActivityIndicator, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import PresensiModal from "@/components/praktikan/PresensiModal";
+import { useSessionContext } from "@/context/session-context";
+import { useAuth } from "@/context/auth-context";
 
 export default function PraktikanDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [isModalVisible, setModalVisible] = useState(false);
-  const { sessions, schedules, users, attendance, recordAttendance } = useSessionContext();
+  const [submitting, setSubmitting] = useState(false);
+  const [attendanceError, setAttendanceError] = useState('');
+  const { sessions, schedules, users, attendance, recordAttendance, loading } = useSessionContext();
+  const { profile } = useAuth();
 
   const session = sessions.find((item) => item.id === id);
   const schedule = session
@@ -17,12 +21,13 @@ export default function PraktikanDetailScreen() {
   const assistant = session
     ? users.find((item) => item.id === session.assistantId)
     : undefined;
-  const practitioner = users.find((item) => item.role === "praktikan");
+  const practitioner = profile;
   const attendanceRecord = session && practitioner
     ? attendance.find((item) => item.sessionId === session.id && item.userId === practitioner.id)
     : undefined;
 
   if (!session || !schedule) {
+    if (loading) return <SafeAreaView style={styles.safeArea}><View style={styles.centerContainer}><ActivityIndicator color="#8AB4FF" /></View></SafeAreaView>;
     return (
       <SafeAreaView style={styles.safeArea}>
         <Stack.Screen options={{ title: "Detail Tidak Ditemukan" }} />
@@ -39,10 +44,16 @@ export default function PraktikanDetailScreen() {
   const isOpen = session.status === "OPEN";
   const hasAttended = attendanceRecord !== undefined;
 
-  const handlePresensi = () => {
+  const handlePresensi = async () => {
     if (!isOpen || hasAttended || !practitioner) return;
-    recordAttendance(session.id, practitioner.id, new Date().toISOString());
-    setModalVisible(false);
+    setSubmitting(true); setAttendanceError('');
+    try {
+      const created = await recordAttendance(session.id, practitioner.id, new Date().toISOString());
+      if (!created) setAttendanceError('Presensi untuk sesi ini sudah tercatat.');
+      setModalVisible(false);
+    } catch (cause) {
+      setAttendanceError(cause instanceof Error ? cause.message : 'Presensi gagal disimpan. Periksa koneksi Anda.');
+    } finally { setSubmitting(false); }
   };
 
   return (
@@ -69,6 +80,7 @@ export default function PraktikanDetailScreen() {
           </View>
         ) : (
           <>
+            {!!attendanceError && <Text style={styles.errorMessage}>{attendanceError}</Text>}
             <Text style={styles.instructionText}>
               {isOpen
                 ? "Sesi ini sedang berlangsung. Silakan lakukan presensi sekarang."
@@ -81,7 +93,7 @@ export default function PraktikanDetailScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.presensiButtonText}>
-                {isOpen ? "Lakukan Presensi" : "Sesi Tidak Terbuka"}
+                {submitting ? 'Menyimpan…' : isOpen ? "Lakukan Presensi" : "Sesi Tidak Terbuka"}
               </Text>
             </TouchableOpacity>
           </>
@@ -93,6 +105,7 @@ export default function PraktikanDetailScreen() {
           onCancel={() => setModalVisible(false)}
           onConfirm={handlePresensi}
         />
+        {submitting && <View style={styles.saving}><ActivityIndicator color="#12121A" /></View>}
       </View>
     </SafeAreaView>
   );
@@ -131,4 +144,6 @@ const styles = StyleSheet.create({
   successContainer: { backgroundColor: "rgba(80, 250, 123, 0.1)", borderWidth: 1, borderColor: "#50FA7B", borderRadius: 12, padding: 20, alignItems: "center", marginTop: 10 },
   successTitle: { color: "#50FA7B", fontSize: 18, fontWeight: "bold", marginBottom: 8 },
   successText: { color: "#F8F8F2", fontSize: 14 },
+  errorMessage: { color: '#FF9B9B', textAlign: 'center', marginBottom: 12 },
+  saving: { position: 'absolute', top: '48%', alignSelf: 'center', backgroundColor: '#F1FA8C', borderRadius: 12, padding: 14 },
 });

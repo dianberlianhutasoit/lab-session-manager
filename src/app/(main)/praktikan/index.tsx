@@ -1,14 +1,17 @@
 import { Stack, useRouter, type Href } from "expo-router";
 import { FlatList, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import type { Schedule, Session } from "../../types";
-import SessionCard from "../../components/praktikan/SessionCard";
-import { useSessionContext } from "../../context/session-context";
+import type { Schedule, Session } from "@/types";
+import SessionCard from "@/components/praktikan/SessionCard";
+import { useSessionContext } from "@/context/session-context";
+import { useAuth } from "@/context/auth-context";
 
 type ScheduledSession = { session: Session; schedule: Schedule };
 
 export default function PraktikanJadwalScreen() {
   const router = useRouter();
   const { schedules, sessions } = useSessionContext();
+  const { profile, logout } = useAuth();
+  const { loading, error } = useSessionContext();
   const scheduledSessions: ScheduledSession[] = sessions.flatMap((session) => {
     const schedule = schedules.find((item) => item.id === session.scheduleId);
     return schedule ? [{ session, schedule }] : [];
@@ -30,7 +33,8 @@ export default function PraktikanJadwalScreen() {
       <View style={styles.container}>
         <View style={styles.headerContainer}>
           <Text style={styles.headerTitle}>Jadwal Praktikum</Text>
-          <Text style={styles.headerSubtitle}>Pilih sesi untuk melihat detail.</Text>
+          <Text style={styles.headerSubtitle}>Halo, {profile?.name ?? 'Praktikan'}. Lihat jadwal dan status sesi Anda.</Text>
+          <TouchableOpacity onPress={() => void logout()}><Text style={styles.historyButton}>Keluar</Text></TouchableOpacity>
         </View>
 
         <FlatList
@@ -46,7 +50,7 @@ export default function PraktikanJadwalScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Tidak ada jadwal praktikum saat ini.</Text>
+              <Text style={styles.emptyText}>{loading ? 'Memuat jadwal…' : error ?? 'Tidak ada jadwal praktikum saat ini.'}</Text>
             </View>
           }
         />

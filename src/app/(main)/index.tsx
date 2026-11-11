@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -20,6 +21,7 @@ import {
   useSessionContext,
   SessionWithDetails,
 } from '@/context/session-context';
+import { useAuth } from '@/context/auth-context';
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -30,6 +32,8 @@ export default function HomeScreen() {
     toggleSessionStatus,
     getSessionsWithDetails,
   } = useSessionContext();
+  const { profile, logout } = useAuth();
+  const { loading, error } = useSessionContext();
 
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -115,8 +119,9 @@ export default function HomeScreen() {
             Manajemen Sesi Praktikum
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-05 s/d SRS-07: Lihat jadwal detail, buka/tutup sesi, dan pantau status kehadiran secara real-time.
+            Halo, {profile?.name ?? 'Asisten'}. Pantau sesi dan kehadiran praktikan.
           </ThemedText>
+          <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
         </View>
 
         {/* Filter & Overview Component */}
@@ -144,7 +149,7 @@ export default function HomeScreen() {
                 Tidak ada sesi praktikum
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                Tidak ada data sesi praktikum yang cocok dengan filter yang dipilih.
+                {loading ? 'Memuat sesi…' : error ?? 'Sesi yang tersedia akan muncul di sini.'}
               </ThemedText>
             </ThemedView>
           ) : (

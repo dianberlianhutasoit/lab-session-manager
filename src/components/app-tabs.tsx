@@ -2,9 +2,11 @@ import { NativeTabs } from 'expo-router/native-tabs';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
+  const { profile } = useAuth();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
   return (
@@ -12,29 +14,29 @@ export default function AppTabs() {
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
-      <NativeTabs.Trigger name="index">
+      {profile?.role === 'asisten' && <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Sesi Lab</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/home.png')}
           renderingMode="template"
         />
-      </NativeTabs.Trigger>
+      </NativeTabs.Trigger>}
 
-      <NativeTabs.Trigger name="praktikan">
+      {profile?.role === 'praktikan' && <NativeTabs.Trigger name="praktikan">
         <NativeTabs.Trigger.Label>Praktikan</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/home.png')}
           renderingMode="template"
         />
-      </NativeTabs.Trigger>
+      </NativeTabs.Trigger>}
 
-      <NativeTabs.Trigger name="explore">
+      {profile?.role === 'asisten' && <NativeTabs.Trigger name="explore">
         <NativeTabs.Trigger.Label>Rekap Presensi</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}
           renderingMode="template"
         />
-      </NativeTabs.Trigger>
+      </NativeTabs.Trigger>}
     </NativeTabs>
   );
 }
