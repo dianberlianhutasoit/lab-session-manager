@@ -9,52 +9,88 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SessionStatusBadge } from './session-status-badge';
+import { formatTimeWIB } from './active-sessions-banner';
 import type { SessionWithDetails } from '@/context/session-context';
+import type { User } from '@/types';
 import { Spacing } from '@/constants/theme';
 
 interface SessionCardProps {
   session: SessionWithDetails;
+  selectedAssistantId?: string;
+  activeAssistant?: User;
+  isUpdating?: boolean;
   onOpenDetail: (session: SessionWithDetails) => void;
   onToggleStatus: (sessionId: string) => void;
   onEditSession?: (session: SessionWithDetails) => void;
   onDeleteSession?: (sessionId: string) => void;
 }
 
+export function confirmSessionStatusChange({
+  session,
+  selectedAssistantId,
+  activeAssistant,
+  onConfirm,
+}: {
+  session: SessionWithDetails;
+  selectedAssistantId?: string;
+  activeAssistant?: User;
+  onConfirm: () => void;
+}) {
+  const isOpen = session.status === 'OPEN';
+  const actionText = isOpen ? 'menutup' : 'membuka';
+  const courseTitle = session.schedule?.title ?? 'sesi ini';
+  const assignedName = session.assistant?.name ?? 'Asisten Pengampu';
+
+  const isDifferentAssistant =
+    Boolean(selectedAssistantId) &&
+    selectedAssistantId !== 'ALL' &&
+    selectedAssistantId !== session.assistantId;
+
+  const warningMessage = isDifferentAssistant
+    ? `⚠️ PERINGATAN ASISTEN PENGGANTI\n\nSesi "${courseTitle}" ditugaskan kepada ${assignedName}, sedangkan akun aktif yang dipilih adalah ${activeAssistant?.name ?? 'Asisten Lain'}.\n\nApakah Anda yakin ingin tetap ${actionText} sesi ini sebagai asisten pengganti?`
+    : `Apakah Anda yakin ingin ${actionText} sesi praktikum "${courseTitle}"?`;
+
+  const dialogTitle = isDifferentAssistant
+    ? 'Peringatan Asisten Pengampu (SRS-08)'
+    : 'Konfirmasi Status Sesi (SRS-08)';
+
+  if (Platform.OS === 'web') {
+    const confirmed = window.confirm(`${dialogTitle}\n\n${warningMessage}`);
+    if (confirmed) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(dialogTitle, warningMessage, [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: isOpen ? 'Tetap Tutup Sesi' : 'Tetap Buka Sesi',
+        style: isOpen ? 'destructive' : 'default',
+        onPress: onConfirm,
+      },
+    ]);
+  }
+}
+
 export function SessionCard({
   session,
+  selectedAssistantId,
+  activeAssistant,
+  isUpdating = false,
   onOpenDetail,
   onToggleStatus,
   onEditSession,
   onDeleteSession,
 }: SessionCardProps) {
-  const { schedule, assistant, status, attendanceCount } = session;
+  const { schedule, assistant, status, attendanceCount, openedAt, closedAt } = session;
   const isOpen = status === 'OPEN';
 
   const handleToggleWithConfirmation = () => {
-    const actionText = isOpen ? 'menutup' : 'membuka';
-    const courseTitle = schedule?.title ?? 'sesi ini';
-
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(
-        `Apakah Anda yakin ingin ${actionText} sesi praktikum "${courseTitle}"?`
-      );
-      if (confirmed) {
-        onToggleStatus(session.id);
-      }
-    } else {
-      Alert.alert(
-        'Konfirmasi Status Sesi',
-        `Apakah Anda yakin ingin ${actionText} sesi praktikum "${courseTitle}"?`,
-        [
-          { text: 'Batal', style: 'cancel' },
-          {
-            text: isOpen ? 'Tutup Sesi' : 'Buka Sesi',
-            style: isOpen ? 'destructive' : 'default',
-            onPress: () => onToggleStatus(session.id),
-          },
-        ]
-      );
-    }
+    confirmSessionStatusChange({
+      session,
+      selectedAssistantId,
+      activeAssistant,
+      onConfirm: () => onToggleStatus(session.id),
+    });
   };
 
   const handleDeleteWithConfirmation = () => {
@@ -86,7 +122,7 @@ export function SessionCard({
 
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
-      {/* Header: Course Code, Class Badge & Status Badge (SRS-07) */}
+      {/* Header: Course Code, Class Badge & Status Badge (SRS-07, SRS-08) */}
       <View style={styles.topRow}>
         <View style={styles.badgesGroup}>
           <View style={styles.codeBadge}>
@@ -109,10 +145,10 @@ export function SessionCard({
             </View>
           ) : null}
         </View>
-        <SessionStatusBadge status={status} size="small" />
+        <SessionStatusBadge status={status} size="small" isUpdating={isUpdating} />
       </View>
 
-      {/* Main Info: Title & Topic (SRS-05, SRS-07) */}
+      {/* Main Info: Title & Topic */}
       <View style={styles.titleBlock}>
         <ThemedText type="subtitle" style={styles.courseTitle}>
           {schedule?.title ?? 'Praktikum'}
@@ -124,7 +160,7 @@ export function SessionCard({
         ) : null}
       </View>
 
-      {/* Detail Meta: Ruangan, Tanggal, Jam (SRS-05) */}
+      {/* Detail Meta: Ruangan, Tanggal, Jam, Waktu Buka/Tutup (SRS-08) */}
       <View style={styles.metaContainer}>
         <View style={styles.metaRow}>
           <ThemedText type="small" themeColor="textSecondary">
@@ -146,7 +182,7 @@ export function SessionCard({
 
         <View style={styles.metaRow}>
           <ThemedText type="small" themeColor="textSecondary">
-            👤 Asisten:
+            👤 Asisten Pengampu:
           </ThemedText>
           <ThemedText type="small">
             {assistant?.name ?? '-'}
@@ -161,9 +197,30 @@ export function SessionCard({
             {attendanceCount} Praktikan
           </ThemedText>
         </View>
+
+        {/* SRS-08: Timestamp Pembukaan / Penutupan Sesi */}
+        {isOpen && openedAt ? (
+          <View style={styles.metaRow}>
+            <ThemedText type="small" themeColor="textSecondary">
+              🟢 Dibuka Pukul:
+            </ThemedText>
+            <ThemedText type="smallBold" style={styles.openTimeText}>
+              {formatTimeWIB(openedAt)}
+            </ThemedText>
+          </View>
+        ) : !isOpen && closedAt ? (
+          <View style={styles.metaRow}>
+            <ThemedText type="small" themeColor="textSecondary">
+              🔴 Ditutup Pukul:
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatTimeWIB(closedAt)}
+            </ThemedText>
+          </View>
+        ) : null}
       </View>
 
-      {/* Action Buttons (SRS-05 Detail, SRS-06 Toggle, SRS-07 Edit & Delete) */}
+      {/* Action Buttons (SRS-05 Detail, SRS-07 Edit & Delete, SRS-08 Status Control) */}
       <View style={styles.actionsRow}>
         <Pressable
           onPress={() => onOpenDetail(session)}
@@ -194,14 +251,20 @@ export function SessionCard({
         ) : null}
 
         <Pressable
+          disabled={isUpdating}
           onPress={handleToggleWithConfirmation}
           style={({ pressed }) => [
             styles.toggleButton,
             isOpen ? styles.toggleButtonClose : styles.toggleButtonOpen,
+            isUpdating && styles.disabledButton,
             pressed && styles.pressed,
           ]}>
           <ThemedText type="smallBold" style={styles.toggleButtonText}>
-            {isOpen ? 'Tutup Sesi' : 'Buka Sesi'}
+            {isUpdating
+              ? 'Memproses...'
+              : isOpen
+                ? 'Tutup Sesi'
+                : 'Buka Sesi'}
           </ThemedText>
         </Pressable>
       </View>
@@ -285,6 +348,9 @@ const styles = StyleSheet.create({
   attendanceText: {
     color: '#0284C7',
   },
+  openTimeText: {
+    color: '#15803D',
+  },
   actionsRow: {
     flexDirection: 'row',
     gap: Spacing.two,
@@ -356,6 +422,9 @@ const styles = StyleSheet.create({
   },
   toggleButtonText: {
     color: '#FFFFFF',
+  },
+  disabledButton: {
+    opacity: 0.55,
   },
   pressed: {
     opacity: 0.75,

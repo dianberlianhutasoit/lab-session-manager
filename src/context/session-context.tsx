@@ -12,6 +12,7 @@ import {
   classes as initialClasses,
   schedules as initialSchedules,
   sessions as initialSessions,
+  statusLogs as initialStatusLogs,
   attendance as initialAttendance,
   permissions as initialPermissions,
 } from '@/data/dummy';
@@ -27,6 +28,7 @@ import {
   firestoreUpdateSessionAndSchedule,
   firestoreDeleteSessionAndSchedule,
   firestoreUpdateSessionStatus,
+  firestoreBatchCloseSessions,
   firestoreRecordAttendance,
 } from '@/services/firestore-service';
 import type {
@@ -41,6 +43,7 @@ import type {
   Session,
   SessionScheduleFormInput,
   SessionStatus,
+  SessionStatusLog,
   User,
 } from '@/types';
 import type { LabClassWithDetails } from '@/components/asisten/class-card';
@@ -48,6 +51,7 @@ import type { LabClassWithDetails } from '@/components/asisten/class-card';
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
   assistant?: User;
+  lastUpdatedByUser?: User;
   attendanceCount: number;
 }
 
@@ -55,6 +59,8 @@ interface SessionContextValue {
   classes: LabClass[];
   sessions: Session[];
   schedules: Schedule[];
+  statusLogs: SessionStatusLog[];
+  updatingSessionIds: string[];
   users: User[];
   attendance: Attendance[];
   isFirestoreConnected: boolean;
@@ -71,10 +77,16 @@ interface SessionContextValue {
     input: SessionScheduleFormInput
   ) => Promise<boolean>;
   deleteSessionSchedule: (sessionId: string) => Promise<boolean>;
-  // SRS-06 / SRS-08: Membuka dan menutup sesi praktikum
-  openSession: (sessionId: string) => void;
-  closeSession: (sessionId: string) => void;
-  toggleSessionStatus: (sessionId: string) => void;
+  // SRS-08: Kontrol Status Pembukaan/Penutupan Sesi (OPEN / CLOSED)
+  openSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  closeSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  toggleSessionStatus: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  closeAllOpenSessions: (
+    assistantIdFilter?: string,
+    actorAssistantId?: string
+  ) => Promise<number>;
+  isSessionUpdating: (sessionId: string) => boolean;
+  getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   recordAttendance: (sessionId: string, userId: string, recordedAt: string) => boolean;
   // Helper queries
   getClassById: (classId: string) => LabClass | undefined;
@@ -106,6 +118,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [classes, setClasses] = useState<LabClass[]>(initialClasses);
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [schedules, setSchedules] = useState<Schedule[]>(initialSchedules);
+  const [statusLogs, setStatusLogs] = useState<SessionStatusLog[]>(initialStatusLogs);
+  const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
@@ -143,6 +157,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (items.length > 0) setSessions(items);
     });
 
+    const unsubLogs = subscribeToCollection<SessionStatusLog>(
+      COLLECTIONS.STATUS_LOGS,
+      (items) => {
+        if (items.length > 0) {
+          const sorted = [...items].sort((a, b) =>
+            b.changedAt.localeCompare(a.changedAt)
+          );
+          setStatusLogs(sorted);
+        }
+      }
+    );
+
     const unsubAttendance = subscribeToCollection<Attendance>(COLLECTIONS.ATTENDANCE, (items) => {
       setAttendance(items);
     });
@@ -156,6 +182,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubClasses?.();
       unsubSchedules?.();
       unsubSessions?.();
+      unsubLogs?.();
       unsubAttendance?.();
       unsubUsers?.();
     };
@@ -208,7 +235,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((cls) => (cls.id === classId ? { ...cls, ...updatedFields } : cls))
       );
 
-      // Sinkronkan courseCode, title, dan className ke schedules yang terkait dengan classId
       const relatedScheduleIds: string[] = [];
       setSchedules((prev) =>
         prev.map((sch) => {
@@ -276,6 +302,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const scheduleId = `schedule-${timestamp}`;
       const sessionId = `session-${timestamp}`;
+      const initialStatus = input.status ?? 'CLOSED';
 
       const newSchedule: Schedule = {
         id: scheduleId,
@@ -296,7 +323,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         classId: input.classId,
         scheduleId,
         assistantId: input.assistantId,
-        status: input.status ?? 'CLOSED',
+        status: initialStatus,
+        openedAt: initialStatus === 'OPEN' ? now : undefined,
+        lastUpdatedBy: input.assistantId,
         createdAt: now,
         updatedAt: now,
       };
@@ -312,6 +341,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         ...newSession,
         schedule: newSchedule,
         assistant: users.find((u) => u.id === newSession.assistantId),
+        lastUpdatedByUser: users.find((u) => u.id === newSession.assistantId),
         attendanceCount: 0,
       };
     },
@@ -326,11 +356,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       const scheduleId = existingSession.scheduleId;
       const now = new Date().toISOString();
+      const nextStatus = input.status ?? existingSession.status;
 
       const sessionUpdates: Partial<Session> = {
         classId: input.classId,
         assistantId: input.assistantId,
-        status: input.status ?? existingSession.status,
+        status: nextStatus,
+        openedAt:
+          nextStatus === 'OPEN' && existingSession.status !== 'OPEN'
+            ? now
+            : existingSession.openedAt,
+        closedAt:
+          nextStatus === 'CLOSED' && existingSession.status === 'OPEN'
+            ? now
+            : existingSession.closedAt,
+        lastUpdatedBy: input.assistantId,
         updatedAt: now,
       };
 
@@ -383,6 +423,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       setSchedules((prev) => prev.filter((sch) => sch.id !== scheduleId));
       setAttendance((prev) => prev.filter((a) => a.sessionId !== sessionId));
+      setStatusLogs((prev) => prev.filter((log) => log.sessionId !== sessionId));
 
       if (isFirebaseConfigured) {
         await firestoreDeleteSessionAndSchedule(
@@ -397,41 +438,196 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [sessions, attendance]
   );
 
-  // Membuka sesi praktikum
-  const openSession = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, status: 'OPEN' as SessionStatus } : s))
-    );
-    if (isFirebaseConfigured) {
-      firestoreUpdateSessionStatus(sessionId, 'OPEN');
-    }
-  }, []);
+  // SRS-08: Fungsi inti transisi status sesi dengan audit log, loading state & rollback
+  const changeSessionStatus = useCallback(
+    async (
+      sessionId: string,
+      targetStatus: SessionStatus,
+      actorAssistantId?: string
+    ): Promise<boolean> => {
+      const existing = sessions.find((s) => s.id === sessionId);
+      if (!existing || existing.status === targetStatus) return false;
 
-  // Menutup sesi praktikum
-  const closeSession = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, status: 'CLOSED' as SessionStatus } : s))
-    );
-    if (isFirebaseConfigured) {
-      firestoreUpdateSessionStatus(sessionId, 'CLOSED');
-    }
-  }, []);
+      const now = new Date().toISOString();
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : existing.assistantId || currentAssistantId;
 
-  // Toggle status sesi praktikum
-  const toggleSessionStatus = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id === sessionId) {
-          const nextStatus: SessionStatus = s.status === 'OPEN' ? 'CLOSED' : 'OPEN';
-          if (isFirebaseConfigured) {
-            firestoreUpdateSessionStatus(sessionId, nextStatus);
-          }
-          return { ...s, status: nextStatus };
+      const actorUser = users.find((u) => u.id === effectiveActorId);
+      const isSubstitute = effectiveActorId !== existing.assistantId;
+
+      const metadata = {
+        openedAt: targetStatus === 'OPEN' ? now : existing.openedAt,
+        closedAt: targetStatus === 'CLOSED' ? now : existing.closedAt,
+        lastUpdatedBy: effectiveActorId,
+      };
+
+      const newLog: SessionStatusLog = {
+        id: `log-${sessionId}-${Date.now()}`,
+        sessionId,
+        previousStatus: existing.status,
+        newStatus: targetStatus,
+        changedBy: effectiveActorId,
+        changedByName: actorUser?.name ?? 'Asisten Lab',
+        isSubstitute,
+        changedAt: now,
+      };
+
+      setUpdatingSessionIds((prev) =>
+        prev.includes(sessionId) ? prev : [...prev, sessionId]
+      );
+
+      // Optimistic UI update
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId
+            ? {
+                ...s,
+                status: targetStatus,
+                ...metadata,
+                updatedAt: now,
+              }
+            : s
+        )
+      );
+      setStatusLogs((prev) => [newLog, ...prev]);
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
         }
-        return s;
-      })
-    );
-  }, []);
+        return true;
+      } catch (err) {
+        // Rollback pada kegagalan Firestore
+        console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? existing : s))
+        );
+        setStatusLogs((prev) => prev.filter((l) => l.id !== newLog.id));
+        return false;
+      } finally {
+        setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
+      }
+    },
+    [sessions, users, currentAssistantId]
+  );
+
+  // SRS-08: Membuka sesi praktikum (CLOSED -> OPEN)
+  const openSession = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      return changeSessionStatus(sessionId, 'OPEN', actorAssistantId);
+    },
+    [changeSessionStatus]
+  );
+
+  // SRS-08: Menutup sesi praktikum (OPEN -> CLOSED)
+  const closeSession = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      return changeSessionStatus(sessionId, 'CLOSED', actorAssistantId);
+    },
+    [changeSessionStatus]
+  );
+
+  // SRS-08: Toggle status sesi praktikum (OPEN <-> CLOSED)
+  const toggleSessionStatus = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      const target = sessions.find((s) => s.id === sessionId);
+      if (!target) return false;
+      const nextStatus: SessionStatus = target.status === 'OPEN' ? 'CLOSED' : 'OPEN';
+      return changeSessionStatus(sessionId, nextStatus, actorAssistantId);
+    },
+    [sessions, changeSessionStatus]
+  );
+
+  // SRS-08: Tutup semua sesi yang sedang OPEN sekaligus (Batch Close)
+  const closeAllOpenSessions = useCallback(
+    async (
+      assistantIdFilter?: string,
+      actorAssistantId?: string
+    ): Promise<number> => {
+      const openTargets = sessions.filter((s) => {
+        if (s.status !== 'OPEN') return false;
+        if (assistantIdFilter && assistantIdFilter !== 'ALL') {
+          return s.assistantId === assistantIdFilter;
+        }
+        return true;
+      });
+
+      if (openTargets.length === 0) return 0;
+
+      const now = new Date().toISOString();
+      const targetIds = openTargets.map((s) => s.id);
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : currentAssistantId;
+      const actorUser = users.find((u) => u.id === effectiveActorId);
+
+      const newLogs: SessionStatusLog[] = openTargets.map((s, idx) => ({
+        id: `log-${s.id}-${Date.now()}-${idx}`,
+        sessionId: s.id,
+        previousStatus: 'OPEN',
+        newStatus: 'CLOSED',
+        changedBy: effectiveActorId,
+        changedByName: actorUser?.name ?? 'Asisten Lab',
+        isSubstitute: effectiveActorId !== s.assistantId,
+        changedAt: now,
+      }));
+
+      setUpdatingSessionIds((prev) => Array.from(new Set([...prev, ...targetIds])));
+
+      const previousSessionsSnapshot = sessions;
+      setSessions((prev) =>
+        prev.map((s) =>
+          targetIds.includes(s.id)
+            ? {
+                ...s,
+                status: 'CLOSED' as SessionStatus,
+                closedAt: now,
+                lastUpdatedBy: effectiveActorId,
+                updatedAt: now,
+              }
+            : s
+        )
+      );
+      setStatusLogs((prev) => [...newLogs, ...prev]);
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreBatchCloseSessions(
+            targetIds,
+            now,
+            effectiveActorId,
+            newLogs
+          );
+        }
+        return targetIds.length;
+      } catch (err) {
+        console.warn('[SessionContext] Gagal menutup semua sesi, rollback:', err);
+        setSessions(previousSessionsSnapshot);
+        const logIds = new Set(newLogs.map((l) => l.id));
+        setStatusLogs((prev) => prev.filter((l) => !logIds.has(l.id)));
+        return 0;
+      } finally {
+        setUpdatingSessionIds((prev) =>
+          prev.filter((id) => !targetIds.includes(id))
+        );
+      }
+    },
+    [sessions, users, currentAssistantId]
+  );
+
+  const isSessionUpdating = useCallback(
+    (sessionId: string) => updatingSessionIds.includes(sessionId),
+    [updatingSessionIds]
+  );
+
+  const getSessionStatusLogs = useCallback(
+    (sessionId: string): SessionStatusLog[] =>
+      statusLogs.filter((log) => log.sessionId === sessionId),
+    [statusLogs]
+  );
 
   const recordAttendance = useCallback(
     (sessionId: string, userId: string, recordedAt: string): boolean => {
@@ -501,6 +697,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       ...sess,
       schedule: getScheduleById(sess.scheduleId),
       assistant: getAssistantById(sess.assistantId),
+      lastUpdatedByUser: sess.lastUpdatedBy
+        ? getAssistantById(sess.lastUpdatedBy)
+        : undefined,
       attendanceCount: getAttendanceCount(sess.id),
     }));
   }, [sessions, getScheduleById, getAssistantById, getAttendanceCount]);
@@ -579,6 +778,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       classes,
       sessions,
       schedules,
+      statusLogs,
+      updatingSessionIds,
       users,
       attendance,
       isFirestoreConnected,
@@ -593,6 +794,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      closeAllOpenSessions,
+      isSessionUpdating,
+      getSessionStatusLogs,
       recordAttendance,
       getClassById,
       getScheduleById,
@@ -613,6 +817,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       classes,
       sessions,
       schedules,
+      statusLogs,
+      updatingSessionIds,
       users,
       attendance,
       isFirestoreConnected,
@@ -626,6 +832,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      closeAllOpenSessions,
+      isSessionUpdating,
+      getSessionStatusLogs,
       recordAttendance,
       getClassById,
       getScheduleById,

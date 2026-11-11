@@ -1,4 +1,11 @@
-import type { Attendance, LabClass, Permission, Schedule, Session, User } from "../types";
+import type {
+  Attendance,
+  LabClass,
+  Schedule,
+  Session,
+  SessionStatusLog,
+  User,
+} from "../types";
 
 export const users: User[] = [
   {
@@ -115,6 +122,8 @@ export const sessions: Session[] = [
     scheduleId: "schedule-001",
     assistantId: "user-asisten-001",
     status: "OPEN",
+    openedAt: "2026-10-26T09:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
   },
   {
     id: "session-002",
@@ -122,6 +131,9 @@ export const sessions: Session[] = [
     scheduleId: "schedule-002",
     assistantId: "user-asisten-002",
     status: "CLOSED",
+    openedAt: "2026-10-27T13:00:00+07:00",
+    closedAt: "2026-10-27T15:00:00+07:00",
+    lastUpdatedBy: "user-asisten-002",
   },
   {
     id: "session-003",
@@ -129,6 +141,42 @@ export const sessions: Session[] = [
     scheduleId: "schedule-003",
     assistantId: "user-asisten-001",
     status: "CLOSED",
+    openedAt: "2026-10-28T10:00:00+07:00",
+    closedAt: "2026-10-28T12:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
+  },
+];
+
+export const statusLogs: SessionStatusLog[] = [
+  {
+    id: "log-001",
+    sessionId: "session-001",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-001",
+    changedByName: "Dimas Saputra",
+    isSubstitute: false,
+    changedAt: "2026-10-26T09:00:00+07:00",
+  },
+  {
+    id: "log-002",
+    sessionId: "session-002",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T13:00:00+07:00",
+  },
+  {
+    id: "log-003",
+    sessionId: "session-002",
+    previousStatus: "OPEN",
+    newStatus: "CLOSED",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T15:00:00+07:00",
   },
 ];
 
