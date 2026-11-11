@@ -1,4 +1,12 @@
-import type { Attendance, Schedule, Session, User } from "../types";
+import type {
+  Attendance,
+  LabClass,
+  Permission,
+  Schedule,
+  Session,
+  SessionStatusLog,
+  User,
+} from "../types";
 
 export const users: User[] = [
   {
@@ -33,9 +41,46 @@ export const users: User[] = [
   },
 ];
 
+export const classes: LabClass[] = [
+  {
+    id: "class-001",
+    courseCode: "LAB101",
+    title: "Dasar Pemrograman",
+    className: "Kelas A",
+    room: "Lab Komputer 1",
+    assistantId: "user-asisten-001",
+    semester: "Ganjil 2026/2027",
+    capacity: 30,
+  },
+  {
+    id: "class-002",
+    courseCode: "LAB204",
+    title: "Basis Data",
+    className: "Kelas B",
+    room: "Lab Komputer 2",
+    assistantId: "user-asisten-002",
+    semester: "Ganjil 2026/2027",
+    capacity: 25,
+  },
+  {
+    id: "class-003",
+    courseCode: "LAB305",
+    title: "Jaringan Komputer",
+    className: "Kelas A",
+    room: "Lab Jaringan",
+    assistantId: "user-asisten-001",
+    semester: "Ganjil 2026/2027",
+    capacity: 30,
+  },
+];
+
 export const schedules: Schedule[] = [
   {
     id: "schedule-001",
+    classId: "class-001",
+    className: "Kelas A",
+    sessionNumber: 1,
+    topic: "Pengenalan Algoritma & Variabel",
     title: "Dasar Pemrograman",
     courseCode: "LAB101",
     date: "2026-10-26",
@@ -45,6 +90,10 @@ export const schedules: Schedule[] = [
   },
   {
     id: "schedule-002",
+    classId: "class-002",
+    className: "Kelas B",
+    sessionNumber: 1,
+    topic: "Pemodelan ERD & DDL SQL",
     title: "Basis Data",
     courseCode: "LAB204",
     date: "2026-10-27",
@@ -54,6 +103,10 @@ export const schedules: Schedule[] = [
   },
   {
     id: "schedule-003",
+    classId: "class-003",
+    className: "Kelas A",
+    sessionNumber: 1,
+    topic: "Subnetting IPv4 & Konfigurasi Router",
     title: "Jaringan Komputer",
     courseCode: "LAB305",
     date: "2026-10-28",
@@ -66,21 +119,65 @@ export const schedules: Schedule[] = [
 export const sessions: Session[] = [
   {
     id: "session-001",
+    classId: "class-001",
     scheduleId: "schedule-001",
     assistantId: "user-asisten-001",
     status: "OPEN",
+    openedAt: "2026-10-26T09:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
   },
   {
     id: "session-002",
+    classId: "class-002",
     scheduleId: "schedule-002",
     assistantId: "user-asisten-002",
     status: "CLOSED",
+    openedAt: "2026-10-27T13:00:00+07:00",
+    closedAt: "2026-10-27T15:00:00+07:00",
+    lastUpdatedBy: "user-asisten-002",
   },
   {
     id: "session-003",
+    classId: "class-003",
     scheduleId: "schedule-003",
     assistantId: "user-asisten-001",
     status: "CLOSED",
+    openedAt: "2026-10-28T10:00:00+07:00",
+    closedAt: "2026-10-28T12:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
+  },
+];
+
+export const statusLogs: SessionStatusLog[] = [
+  {
+    id: "log-001",
+    sessionId: "session-001",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-001",
+    changedByName: "Dimas Saputra",
+    isSubstitute: false,
+    changedAt: "2026-10-26T09:00:00+07:00",
+  },
+  {
+    id: "log-002",
+    sessionId: "session-002",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T13:00:00+07:00",
+  },
+  {
+    id: "log-003",
+    sessionId: "session-002",
+    previousStatus: "OPEN",
+    newStatus: "CLOSED",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T15:00:00+07:00",
   },
 ];
 
@@ -104,3 +201,31 @@ export const attendance: Attendance[] = [
     recordedAt: "2026-10-28T10:01:00+07:00",
   },
 ];
+
+export const permissions: Permission[] = [
+  {
+    id: "permission-001",
+    sessionId: "session-001",
+    userId: "user-praktikan-001",
+    studentName: "Nadia Putri",
+    studentEmail: "nadia.putri@example.test",
+    reason: "Mohon izin tidak hadir pada sesi Dasar Pemrograman karena sedang demam tinggi dan dirawat di rumah sakit.",
+    category: "SAKIT",
+    aiAnalysis: "Alasan diklasifikasikan sebagai Sakit karena menyebutkan kondisi demam tinggi dan rawat inap.",
+    status: "PENDING",
+    createdAt: "2026-10-25T08:30:00+07:00",
+  },
+  {
+    id: "permission-002",
+    sessionId: "session-003",
+    userId: "user-praktikan-002",
+    studentName: "Rafi Pratama",
+    studentEmail: "rafi.pratama@example.test",
+    reason: "Menghadiri konferensi nasional karya ilmiah mewakili universitas di Jakarta.",
+    category: "AKADEMIK",
+    aiAnalysis: "Alasan diklasifikasikan sebagai Akademik terkait partisipasi konferensi universitas.",
+    status: "APPROVED",
+    createdAt: "2026-10-26T14:15:00+07:00",
+  },
+];
+

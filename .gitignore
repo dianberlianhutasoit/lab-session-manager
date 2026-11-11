@@ -31,7 +31,9 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+.env.local
 
 # typescript
 *.tsbuildinfo
@@ -44,3 +46,8 @@ example
 
 # Firebase configuration
 google-services.json
+
+# personal notes & implementation plans
+programmer3.md
+SRS7Implementationplan.md
+SRS8Implementationplan.md

@@ -1,38 +1,63 @@
-import React from 'react';
-import {
-  Modal,
-  View,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  Platform,
-} from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { SessionStatusBadge } from './session-status-badge';
-import type { SessionWithDetails } from '@/context/session-context';
 import { Spacing } from '@/constants/theme';
+import type { SessionWithDetails } from '@/context/session-context';
+import type { SessionStatusLog, User } from '@/types';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { formatTimeWIB } from './active-sessions-banner';
+import { confirmSessionStatusChange } from './session-card';
+import { SessionStatusBadge } from './session-status-badge';
 
 interface SessionDetailModalProps {
   session: SessionWithDetails | null;
   visible: boolean;
+  selectedAssistantId?: string;
+  activeAssistant?: User;
+  isUpdating?: boolean;
+  statusLogs?: SessionStatusLog[];
   onClose: () => void;
   onToggleStatus: (sessionId: string) => void;
+  onEditSession?: (session: SessionWithDetails) => void;
 }
 
 export function SessionDetailModal({
   session,
   visible,
+  selectedAssistantId,
+  activeAssistant,
+  isUpdating = false,
+  statusLogs = [],
   onClose,
   onToggleStatus,
+  onEditSession,
 }: SessionDetailModalProps) {
   if (!session) return null;
 
-  const { schedule, assistant, status, attendanceCount } = session;
+  const {
+    schedule,
+    assistant,
+    lastUpdatedByUser,
+    status,
+    openedAt,
+    closedAt,
+    attendanceCount,
+  } = session;
   const isOpen = status === 'OPEN';
 
-  const handleToggle = () => {
-    onToggleStatus(session.id);
+  const handleToggleWithConfirmation = () => {
+    confirmSessionStatusChange({
+      session,
+      selectedAssistantId,
+      activeAssistant,
+      onConfirm: () => onToggleStatus(session.id),
+    });
   };
 
   return (
@@ -47,7 +72,7 @@ export function SessionDetailModal({
           <View style={styles.header}>
             <View style={styles.headerTitleWrap}>
               <ThemedText type="small" themeColor="textSecondary">
-                DETAIL SESI PRAKTIKUM
+                DETAIL & KONTROL STATUS SESI (SRS-08)
               </ThemedText>
               <ThemedText type="subtitle" style={styles.titleText}>
                 {schedule?.title ?? 'Sesi Praktikum'}
@@ -59,15 +84,48 @@ export function SessionDetailModal({
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {/* Status Section (SRS-07) */}
+            {/* Status Section (SRS-08) */}
             <View style={styles.statusSection}>
-              <ThemedText type="small" themeColor="textSecondary">
-                Status Sesi Saat Ini:
-              </ThemedText>
-              <SessionStatusBadge status={status} />
+              <View style={styles.statusHeaderRow}>
+                <ThemedText type="smallBold" style={styles.statusLabel}>
+                  Status Sesi Saat Ini:
+                </ThemedText>
+                <SessionStatusBadge status={status} isUpdating={isUpdating} />
+              </View>
+
+              <View style={styles.statusTimestampsBox}>
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Waktu Terakhir Dibuka (OPEN):
+                  </ThemedText>
+                  <ThemedText type="smallBold">
+                    {formatTimeWIB(openedAt)}
+                  </ThemedText>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Waktu Terakhir Ditutup (CLOSED):
+                  </ThemedText>
+                  <ThemedText type="smallBold">
+                    {formatTimeWIB(closedAt)}
+                  </ThemedText>
+                </View>
+
+                {lastUpdatedByUser ? (
+                  <View style={styles.infoRow}>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      Terakhir Diubah Oleh:
+                    </ThemedText>
+                    <ThemedText type="small">
+                      👤 {lastUpdatedByUser.name}
+                    </ThemedText>
+                  </View>
+                ) : null}
+              </View>
             </View>
 
-            {/* Schedule Details (SRS-05) */}
+            {/* Schedule Details (SRS-05, SRS-07) */}
             <View style={styles.infoGroup}>
               <ThemedText type="smallBold" style={styles.sectionLabel}>
                 Informasi Jadwal & Laboratorium
@@ -79,6 +137,33 @@ export function SessionDetailModal({
                 </ThemedText>
                 <ThemedText type="smallBold">{schedule?.courseCode ?? '-'}</ThemedText>
               </View>
+
+              {schedule?.className ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Kelas
+                  </ThemedText>
+                  <ThemedText type="smallBold">{schedule.className}</ThemedText>
+                </View>
+              ) : null}
+
+              {schedule?.sessionNumber !== undefined ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Pertemuan Ke-
+                  </ThemedText>
+                  <ThemedText type="small">{schedule.sessionNumber}</ThemedText>
+                </View>
+              ) : null}
+
+              {schedule?.topic ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Topik Materi
+                  </ThemedText>
+                  <ThemedText type="small" style={styles.topicValue}>{schedule.topic}</ThemedText>
+                </View>
+              ) : null}
 
               <View style={styles.infoRow}>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
@@ -138,18 +223,74 @@ export function SessionDetailModal({
                 <ThemedText type="smallBold">{attendanceCount} Praktikan</ThemedText>
               </View>
             </View>
+
+            {/* SRS-08: Riwayat Perubahan Status Sesi (Audit Log) */}
+            <View style={styles.infoGroup}>
+              <ThemedText type="smallBold" style={styles.sectionLabel}>
+                Riwayat Perubahan Status Sesi ({statusLogs.length})
+              </ThemedText>
+
+              {statusLogs.length === 0 ? (
+                <ThemedText type="small" themeColor="textSecondary">
+                  Belum ada catatan riwayat perubahan status pada sesi ini.
+                </ThemedText>
+              ) : (
+                <View style={styles.logsList}>
+                  {statusLogs.slice(0, 5).map((log) => {
+                    const isOpened = log.newStatus === 'OPEN';
+                    return (
+                      <View key={log.id} style={styles.logItem}>
+                        <View style={styles.logItemHeader}>
+                          <ThemedText
+                            type="smallBold"
+                            style={isOpened ? styles.logStatusOpen : styles.logStatusClosed}>
+                            {isOpened ? '🟢 DIBUKA (OPEN)' : '🔴 DITUTUP (CLOSED)'}
+                          </ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            {formatTimeWIB(log.changedAt)}
+                          </ThemedText>
+                        </View>
+                        <ThemedText type="small" themeColor="textSecondary">
+                          Oleh: {log.changedByName}
+                          {log.isSubstitute ? ' (Asisten Pengganti)' : ''}
+                        </ThemedText>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
           </ScrollView>
 
-          {/* Action Footer (SRS-06) */}
+          {/* Action Footer (SRS-07, SRS-08) */}
           <View style={styles.footer}>
+            {onEditSession ? (
+              <Pressable
+                onPress={() => {
+                  onClose();
+                  onEditSession(session);
+                }}
+                style={styles.editModalButton}>
+                <ThemedText type="smallBold" style={styles.editModalButtonText}>
+                  ✏️ Edit Jadwal
+                </ThemedText>
+              </Pressable>
+            ) : null}
+
             <Pressable
-              onPress={handleToggle}
+              disabled={isUpdating}
+              onPress={handleToggleWithConfirmation}
               style={[
                 styles.actionButton,
                 isOpen ? styles.actionButtonClose : styles.actionButtonOpen,
+                isUpdating && styles.disabledButton,
               ]}>
               <ThemedText style={styles.actionButtonText}>
-                {isOpen ? '🔴 Tutup Sesi Sekarang' : '🟢 Buka Sesi Sekarang'}
+                {isUpdating
+                  ? '⏳ Memproses Status...'
+                  : isOpen
+                    ? '🔴 Tutup Sesi Sekarang'
+                    : '🟢 Buka Sesi Sekarang'}
               </ThemedText>
             </Pressable>
           </View>
@@ -173,7 +314,7 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 520,
-    maxHeight: '85%',
+    maxHeight: '88%',
     borderRadius: 20,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -219,12 +360,26 @@ const styles = StyleSheet.create({
     gap: Spacing.four,
   },
   statusSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: Spacing.three,
     backgroundColor: '#F8FAFC',
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: Spacing.two,
+  },
+  statusHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusLabel: {
+    color: '#334155',
+  },
+  statusTimestampsBox: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#CBD5E1',
+    paddingTop: 8,
+    gap: 2,
   },
   infoGroup: {
     gap: Spacing.two,
@@ -245,14 +400,60 @@ const styles = StyleSheet.create({
   infoLabel: {
     flex: 1,
   },
+  topicValue: {
+    flex: 1.5,
+    textAlign: 'right',
+  },
+  logsList: {
+    gap: 8,
+  },
+  logItem: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    gap: 2,
+  },
+  logItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  logStatusOpen: {
+    color: '#15803D',
+    fontSize: 12,
+  },
+  logStatusClosed: {
+    color: '#B91C1C',
+    fontSize: 12,
+  },
   footer: {
+    flexDirection: 'row',
+    gap: Spacing.two,
     padding: Spacing.four,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
   },
-  actionButton: {
+  editModalButton: {
+    flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  editModalButtonText: {
+    color: '#0369A1',
+  },
+  actionButton: {
+    flex: 1.4,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -270,5 +471,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  disabledButton: {
+    opacity: 0.55,
   },
 });

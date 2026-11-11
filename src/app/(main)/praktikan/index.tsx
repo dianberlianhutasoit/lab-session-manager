@@ -24,9 +24,14 @@ export default function PraktikanJadwalScreen() {
         options={{
           title: "Jadwal Praktikum",
           headerRight: () => (
-            <TouchableOpacity onPress={() => router.push("/praktikan/riwayat" as Href)}>
-              <Text style={styles.historyButton}>Riwayat</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+              <TouchableOpacity onPress={() => router.push("/praktikan/izin" as Href)}>
+                <Text style={styles.historyButton}>Izin</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push("/praktikan/riwayat" as Href)}>
+                <Text style={styles.historyButton}>Riwayat</Text>
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />

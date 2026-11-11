@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +10,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { SessionCard } from '@/components/asisten/session-card';
+import {
+  SessionCard,
+  confirmSessionStatusChange,
+} from '@/components/asisten/session-card';
+import { ActiveSessionsControlBanner } from '@/components/asisten/active-sessions-banner';
+import {
+  ClassCard,
+  LabClassWithDetails,
+} from '@/components/asisten/class-card';
+import { ClassFormModal } from '@/components/asisten/class-form-modal';
+import { SessionFormModal } from '@/components/asisten/session-form-modal';
 import {
   SessionFilterHeader,
   StatusFilter,
@@ -22,33 +33,83 @@ import {
   SessionWithDetails,
 } from '@/context/session-context';
 import { useAuth } from '@/context/auth-context';
+import type {
+  LabClass,
+  LabClassFormInput,
+  SessionScheduleFormInput,
+} from '@/types';
+
+type ManagementSubTab = 'SESSIONS' | 'CLASSES';
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const theme = useTheme();
 
   const {
+    classes,
     users,
+    updatingSessionIds,
+    isFirestoreConnected,
+    setCurrentAssistantId,
+    createClass,
+    updateClass,
+    deleteClass,
+    createSessionSchedule,
+    updateSessionSchedule,
+    deleteSessionSchedule,
     toggleSessionStatus,
+    closeAllOpenSessions,
+    getSessionStatusLogs,
+    getClassesWithDetails,
     getSessionsWithDetails,
   } = useSessionContext();
   const { profile, logout } = useAuth();
   const { loading, error } = useSessionContext();
 
+  const [activeSubTab, setActiveSubTab] = useState<ManagementSubTab>('SESSIONS');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [activeModalSession, setActiveModalSession] = useState<SessionWithDetails | null>(
     null
   );
 
+  // State Modal CRUD Kelas (SRS-07)
+  const [isClassFormVisible, setIsClassFormVisible] = useState(false);
+  const [editingClass, setEditingClass] = useState<LabClass | null>(null);
+
+  // State Modal CRUD Sesi & Jadwal (SRS-07)
+  const [isSessionFormVisible, setIsSessionFormVisible] = useState(false);
+  const [editingSession, setEditingSession] = useState<SessionWithDetails | null>(null);
+  const [preselectedClassForSession, setPreselectedClassForSession] =
+    useState<LabClass | null>(null);
+
   const assistants = useMemo(
     () => users.filter((u) => u.role === 'asisten'),
     [users]
   );
 
+  const activeAssistant = useMemo(
+    () => assistants.find((a) => a.id === selectedAssistantId),
+    [assistants, selectedAssistantId]
+  );
+
+  const handleSelectAssistant = (id: string) => {
+    setSelectedAssistantId(id);
+    if (id !== 'ALL') {
+      setCurrentAssistantId(id);
+    }
+  };
+
+  const allClassesWithDetails = getClassesWithDetails();
   const allSessionsWithDetails = getSessionsWithDetails();
 
-  // Hitung jumlah statistik sesi (SRS-07)
+  // Sesi yang sedang berstatus OPEN (SRS-08)
+  const openSessions = useMemo(
+    () => allSessionsWithDetails.filter((s) => s.status === 'OPEN'),
+    [allSessionsWithDetails]
+  );
+
+  // Hitung jumlah statistik sesi
   const counts = useMemo(() => {
     const relevantSessions =
       selectedAssistantId === 'ALL'
@@ -61,7 +122,7 @@ export default function HomeScreen() {
     return { total, open, closed };
   }, [allSessionsWithDetails, selectedAssistantId]);
 
-  // Filter daftar sesi berdasarkan asisten dan status (SRS-05, SRS-07)
+  // Filter daftar sesi berdasarkan asisten dan status
   const filteredSessions = useMemo(() => {
     return allSessionsWithDetails.filter((s) => {
       const matchAssistant =
@@ -72,13 +133,24 @@ export default function HomeScreen() {
     });
   }, [allSessionsWithDetails, selectedAssistantId, statusFilter]);
 
-  // Sync active modal session jika statusnya berubah saat modal terbuka
+  // Filter daftar kelas berdasarkan asisten
+  const filteredClasses = useMemo(() => {
+    if (selectedAssistantId === 'ALL') return allClassesWithDetails;
+    return allClassesWithDetails.filter((c) => c.assistantId === selectedAssistantId);
+  }, [allClassesWithDetails, selectedAssistantId]);
+
+  // Sync active modal session jika datanya berubah saat modal terbuka
   const currentModalSession = useMemo(() => {
     if (!activeModalSession) return null;
     return (
       allSessionsWithDetails.find((s) => s.id === activeModalSession.id) ?? null
     );
   }, [allSessionsWithDetails, activeModalSession]);
+
+  const currentModalLogs = useMemo(() => {
+    if (!currentModalSession) return [];
+    return getSessionStatusLogs(currentModalSession.id);
+  }, [currentModalSession, getSessionStatusLogs]);
 
   const handleOpenDetail = (session: SessionWithDetails) => {
     setActiveModalSession(session);
@@ -88,8 +160,66 @@ export default function HomeScreen() {
     setActiveModalSession(null);
   };
 
+  // SRS-08: Handler Toggle Status Sesi dengan pencatatan identitas asisten aktif
   const handleToggleStatus = (sessionId: string) => {
-    toggleSessionStatus(sessionId);
+    toggleSessionStatus(sessionId, selectedAssistantId);
+  };
+
+  const handleBannerCloseSingle = (session: SessionWithDetails) => {
+    confirmSessionStatusChange({
+      session,
+      selectedAssistantId,
+      activeAssistant,
+      onConfirm: () => toggleSessionStatus(session.id, selectedAssistantId),
+    });
+  };
+
+  const handleCloseAllOpenSessions = () => {
+    closeAllOpenSessions('ALL', selectedAssistantId);
+  };
+
+  // Handlers CRUD Kelas (SRS-07)
+  const handleOpenCreateClass = () => {
+    setEditingClass(null);
+    setIsClassFormVisible(true);
+  };
+
+  const handleOpenEditClass = (labClass: LabClassWithDetails) => {
+    setEditingClass(labClass);
+    setIsClassFormVisible(true);
+  };
+
+  const handleClassFormSubmit = async (input: LabClassFormInput) => {
+    if (editingClass) {
+      await updateClass(editingClass.id, input);
+    } else {
+      await createClass(input);
+    }
+  };
+
+  // Handlers CRUD Sesi & Jadwal (SRS-07)
+  const handleOpenCreateSession = (preselected?: LabClass) => {
+    setEditingSession(null);
+    setPreselectedClassForSession(preselected ?? null);
+    setIsSessionFormVisible(true);
+  };
+
+  const handleOpenEditSession = (session: SessionWithDetails) => {
+    setEditingSession(session);
+    setPreselectedClassForSession(null);
+    setIsSessionFormVisible(true);
+  };
+
+  const handleSessionFormSubmit = async (input: SessionScheduleFormInput) => {
+    if (editingSession) {
+      await updateSessionSchedule(editingSession.id, input);
+    } else {
+      await createSessionSchedule(input);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    await deleteSessionSchedule(sessionId);
   };
 
   const insets = {
@@ -110,67 +240,224 @@ export default function HomeScreen() {
       <View style={styles.container}>
         {/* Header Title Section */}
         <View style={styles.header}>
-          <View style={styles.badgeRole}>
-            <ThemedText type="smallBold" style={styles.badgeRoleText}>
-              PANEL ASISTEN LABORATORIUM
-            </ThemedText>
+          <View style={styles.headerBadgeRow}>
+            <View style={styles.badgeRole}>
+              <ThemedText type="smallBold" style={styles.badgeRoleText}>
+                PANEL ASISTEN LABORATORIUM
+              </ThemedText>
+            </View>
+
+            <View
+              style={[
+                styles.dbBadge,
+                isFirestoreConnected ? styles.dbBadgeOnline : styles.dbBadgeLocal,
+              ]}>
+              <View
+                style={[
+                  styles.dbDot,
+                  isFirestoreConnected ? styles.dbDotOnline : styles.dbDotLocal,
+                ]}
+              />
+              <ThemedText
+                type="smallBold"
+                style={[
+                  styles.dbBadgeText,
+                  isFirestoreConnected ? styles.dbTextOnline : styles.dbTextLocal,
+                ]}>
+                {isFirestoreConnected ? 'Firestore Aktif' : 'Firestore Siap'}
+              </ThemedText>
+            </View>
           </View>
+
           <ThemedText type="title" style={styles.title}>
-            Manajemen Sesi Praktikum
+            Manajemen Praktikum & Status Sesi
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            Halo, {profile?.name ?? 'Asisten'}. Pantau sesi dan kehadiran praktikan.
+            Halo, {profile?.name ?? 'Asisten'}. Kelola kelas & jadwal praktikum, kontrol status pembukaan/penutupan sesi (OPEN/CLOSED), serta pantau kehadiran praktikan.
           </ThemedText>
           <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
+        </View>
+
+        {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas (SRS-07) */}
+        <View style={styles.subTabContainer}>
+          <Pressable
+            onPress={() => setActiveSubTab('SESSIONS')}
+            style={[
+              styles.subTabButton,
+              activeSubTab === 'SESSIONS' && styles.subTabButtonActive,
+            ]}>
+            <ThemedText
+              type="smallBold"
+              style={[
+                styles.subTabText,
+                activeSubTab === 'SESSIONS' && styles.subTabTextActive,
+              ]}>
+              📅 Jadwal Sesi ({allSessionsWithDetails.length})
+            </ThemedText>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setActiveSubTab('CLASSES')}
+            style={[
+              styles.subTabButton,
+              activeSubTab === 'CLASSES' && styles.subTabButtonActive,
+            ]}>
+            <ThemedText
+              type="smallBold"
+              style={[
+                styles.subTabText,
+                activeSubTab === 'CLASSES' && styles.subTabTextActive,
+              ]}>
+              🏫 Data Kelas ({allClassesWithDetails.length})
+            </ThemedText>
+          </Pressable>
         </View>
 
         {/* Filter & Overview Component */}
         <SessionFilterHeader
           assistants={assistants}
           selectedAssistantId={selectedAssistantId}
-          onSelectAssistant={setSelectedAssistantId}
+          onSelectAssistant={handleSelectAssistant}
           statusFilter={statusFilter}
           onSelectStatusFilter={setStatusFilter}
           counts={counts}
         />
 
-        {/* Sessions List */}
-        <View style={styles.sessionList}>
-          <View style={styles.listHeader}>
-            <ThemedText type="subtitle" style={styles.listTitle}>
-              Daftar Sesi ({filteredSessions.length})
-            </ThemedText>
-          </View>
+        {activeSubTab === 'SESSIONS' ? (
+          /* TAB 1: JADWAL SESI & KONTROL STATUS (SRS-07 & SRS-08) */
+          <View style={styles.sessionList}>
+            {/* SRS-08: Banner Kontrol Cepat Sesi Aktif (OPEN) */}
+            <ActiveSessionsControlBanner
+              openSessions={openSessions}
+              selectedAssistantId={selectedAssistantId}
+              activeAssistant={activeAssistant}
+              updatingSessionIds={updatingSessionIds}
+              onCloseSingleSession={handleBannerCloseSingle}
+              onCloseAllSessions={handleCloseAllOpenSessions}
+            />
 
-          {filteredSessions.length === 0 ? (
-            <ThemedView type="backgroundElement" style={styles.emptyContainer}>
-              <ThemedText style={styles.emptyIcon}>📂</ThemedText>
-              <ThemedText type="subtitle" style={styles.emptyTitle}>
-                Tidak ada sesi praktikum
+            <View style={styles.listHeader}>
+              <ThemedText type="subtitle" style={styles.listTitle}>
+                Daftar Jadwal Sesi ({filteredSessions.length})
               </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                {loading ? 'Memuat sesi…' : error ?? 'Sesi yang tersedia akan muncul di sini.'}
+              <Pressable
+                onPress={() => handleOpenCreateSession()}
+                style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
+                <ThemedText type="smallBold" style={styles.primaryAddButtonText}>
+                  + Tambah Sesi
+                </ThemedText>
+              </Pressable>
+            </View>
+
+            {loading ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Memuat sesi…
+                </ThemedText>
+              </ThemedView>
+            ) : filteredSessions.length === 0 ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText style={styles.emptyIcon}>📂</ThemedText>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Tidak ada sesi praktikum
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                  {error ?? 'Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.'}
+                </ThemedText>
+              </ThemedView>
+            ) : (
+              filteredSessions.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  selectedAssistantId={selectedAssistantId}
+                  activeAssistant={activeAssistant}
+                  isUpdating={updatingSessionIds.includes(session.id)}
+                  onOpenDetail={handleOpenDetail}
+                  onToggleStatus={handleToggleStatus}
+                  onEditSession={handleOpenEditSession}
+                  onDeleteSession={handleDeleteSession}
+                />
+              ))
+            )}
+          </View>
+        ) : (
+          /* TAB 2: DATA KELAS PRAKTIKUM (SRS-07) */
+          <View style={styles.sessionList}>
+            <View style={styles.listHeader}>
+              <ThemedText type="subtitle" style={styles.listTitle}>
+                Master Kelas Praktikum ({filteredClasses.length})
               </ThemedText>
-            </ThemedView>
-          ) : (
-            filteredSessions.map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                onOpenDetail={handleOpenDetail}
-                onToggleStatus={handleToggleStatus}
-              />
-            ))
-          )}
-        </View>
+
+              <Pressable
+                onPress={handleOpenCreateClass}
+                style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
+                <ThemedText type="smallBold" style={styles.primaryAddButtonText}>
+                  + Tambah Kelas
+                </ThemedText>
+              </Pressable>
+            </View>
+
+            {filteredClasses.length === 0 ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText style={styles.emptyIcon}>🏫</ThemedText>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Belum ada kelas praktikum
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                  Silakan klik tombol &quot;+ Tambah Kelas&quot; untuk menambahkan kelas praktikum baru.
+                </ThemedText>
+              </ThemedView>
+            ) : (
+              filteredClasses.map((labClass) => (
+                <ClassCard
+                  key={labClass.id}
+                  labClass={labClass}
+                  onAddSession={(cls) => handleOpenCreateSession(cls)}
+                  onEdit={handleOpenEditClass}
+                  onDelete={deleteClass}
+                />
+              ))
+            )}
+          </View>
+        )}
       </View>
 
-      {/* Modal Detail Sesi Praktikum (SRS-05, SRS-06, SRS-07) */}
+      {/* Modal Detail Sesi & Riwayat Status (SRS-08) */}
       <SessionDetailModal
         session={currentModalSession}
         visible={!!currentModalSession}
+        selectedAssistantId={selectedAssistantId}
+        activeAssistant={activeAssistant}
+        isUpdating={
+          currentModalSession
+            ? updatingSessionIds.includes(currentModalSession.id)
+            : false
+        }
+        statusLogs={currentModalLogs}
         onClose={handleCloseDetail}
         onToggleStatus={handleToggleStatus}
+        onEditSession={handleOpenEditSession}
+      />
+
+      {/* Modal Form Tambah / Edit Kelas Praktikum (SRS-07) */}
+      <ClassFormModal
+        visible={isClassFormVisible}
+        initialData={editingClass}
+        assistants={assistants}
+        onClose={() => setIsClassFormVisible(false)}
+        onSubmit={handleClassFormSubmit}
+      />
+
+      {/* Modal Form Tambah / Edit Jadwal Sesi Praktikum (SRS-07) */}
+      <SessionFormModal
+        visible={isSessionFormVisible}
+        initialSession={editingSession}
+        preselectedClass={preselectedClassForSession}
+        classes={classes}
+        assistants={assistants}
+        onClose={() => setIsSessionFormVisible(false)}
+        onSubmit={handleSessionFormSubmit}
       />
     </ScrollView>
   );
@@ -193,6 +480,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: Spacing.two,
   },
+  headerBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   badgeRole: {
     backgroundColor: '#EEF2FF',
     paddingHorizontal: 10,
@@ -205,9 +499,80 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.5,
   },
+  dbBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  dbBadgeOnline: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  dbBadgeLocal: {
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  dbDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  dbDotOnline: {
+    backgroundColor: '#16A34A',
+  },
+  dbDotLocal: {
+    backgroundColor: '#0284C7',
+  },
+  dbBadgeText: {
+    fontSize: 11,
+  },
+  dbTextOnline: {
+    color: '#15803D',
+  },
+  dbTextLocal: {
+    color: '#0369A1',
+  },
   title: {
     fontSize: 26,
     lineHeight: 32,
+  },
+  subTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  subTabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  subTabButtonActive: {
+    backgroundColor: '#0284C7',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  subTabText: {
+    color: '#475569',
+    fontSize: 13,
+  },
+  subTabTextActive: {
+    color: '#FFFFFF',
   },
   sessionList: {
     gap: Spacing.three,
@@ -216,9 +581,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: Spacing.two,
   },
   listTitle: {
     fontSize: 18,
+    flex: 1,
+  },
+  primaryAddButton: {
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  primaryAddButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+  },
+  pressed: {
+    opacity: 0.75,
   },
   emptyContainer: {
     padding: Spacing.five,
