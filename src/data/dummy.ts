@@ -1,4 +1,4 @@
-import type { Attendance, LabClass, Schedule, Session, User } from "../types";
+import type { Attendance, LabClass, Permission, Schedule, Session, User } from "../types";
 
 export const users: User[] = [
   {
@@ -152,3 +152,31 @@ export const attendance: Attendance[] = [
     recordedAt: "2026-10-28T10:01:00+07:00",
   },
 ];
+
+export const permissions: Permission[] = [
+  {
+    id: "permission-001",
+    sessionId: "session-001",
+    userId: "user-praktikan-001",
+    studentName: "Nadia Putri",
+    studentEmail: "nadia.putri@example.test",
+    reason: "Mohon izin tidak hadir pada sesi Dasar Pemrograman karena sedang demam tinggi dan dirawat di rumah sakit.",
+    category: "SAKIT",
+    aiAnalysis: "Alasan diklasifikasikan sebagai Sakit karena menyebutkan kondisi demam tinggi dan rawat inap.",
+    status: "PENDING",
+    createdAt: "2026-10-25T08:30:00+07:00",
+  },
+  {
+    id: "permission-002",
+    sessionId: "session-003",
+    userId: "user-praktikan-002",
+    studentName: "Rafi Pratama",
+    studentEmail: "rafi.pratama@example.test",
+    reason: "Menghadiri konferensi nasional karya ilmiah mewakili universitas di Jakarta.",
+    category: "AKADEMIK",
+    aiAnalysis: "Alasan diklasifikasikan sebagai Akademik terkait partisipasi konferensi universitas.",
+    status: "APPROVED",
+    createdAt: "2026-10-26T14:15:00+07:00",
+  },
+];
+

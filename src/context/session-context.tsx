@@ -13,6 +13,7 @@ import {
   schedules as initialSchedules,
   sessions as initialSessions,
   attendance as initialAttendance,
+  permissions as initialPermissions,
 } from '@/data/dummy';
 import { isFirebaseConfigured } from '@/config/firebase';
 import {
@@ -33,6 +34,9 @@ import type {
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
+  Permission,
+  PermissionCategory,
+  PermissionStatus,
   Schedule,
   Session,
   SessionScheduleFormInput,
@@ -82,6 +86,18 @@ interface SessionContextValue {
   // Rekap Presensi Praktikan
   getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
   getPractitioners: () => User[];
+  // SRS-11 s/d SRS-13: Pengajuan Izin & Integrasi AI
+  permissions: Permission[];
+  currentStudentId: string;
+  setCurrentStudentId: (id: string) => void;
+  addPermission: (data: {
+    sessionId: string;
+    reason: string;
+    category?: PermissionCategory;
+    aiAnalysis?: string;
+  }) => Permission;
+  getPermissionsByUser: (userId: string) => Permission[];
+  updatePermissionStatus: (permissionId: string, status: PermissionStatus) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -95,6 +111,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
   const [currentAssistantId, setCurrentAssistantId] = useState<string>('user-asisten-001');
+  const [permissions, setPermissions] = useState<Permission[]>(initialPermissions);
+  const [currentStudentId, setCurrentStudentId] = useState<string>('user-praktikan-001');
 
   useEffect(() => {
     attendanceRef.current = attendance;
@@ -511,6 +529,51 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
+  // SRS-11: Mengajukan izin baru
+  const addPermission = useCallback(
+    (data: {
+      sessionId: string;
+      reason: string;
+      category?: PermissionCategory;
+      aiAnalysis?: string;
+    }): Permission => {
+      const student = users.find((u) => u.id === currentStudentId);
+      const newPermission: Permission = {
+        id: `permission-${Date.now()}`,
+        sessionId: data.sessionId,
+        userId: currentStudentId,
+        studentName: student?.name ?? 'Praktikan',
+        studentEmail: student?.email ?? 'praktikan@example.test',
+        reason: data.reason,
+        category: data.category ?? 'Unclassified',
+        aiAnalysis: data.aiAnalysis,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      };
+      setPermissions((prev) => [newPermission, ...prev]);
+      return newPermission;
+    },
+    [currentStudentId, users]
+  );
+
+  // SRS-11: Filter riwayat izin milik praktikan tertentu
+  const getPermissionsByUser = useCallback(
+    (userId: string): Permission[] => {
+      return permissions.filter((p) => p.userId === userId);
+    },
+    [permissions]
+  );
+
+  // SRS-10: Memperbarui status izin (APPROVED/REJECTED) oleh asisten
+  const updatePermissionStatus = useCallback(
+    (permissionId: string, status: PermissionStatus) => {
+      setPermissions((prev) =>
+        prev.map((p) => (p.id === permissionId ? { ...p, status } : p))
+      );
+    },
+    []
+  );
+
   const value = useMemo(
     () => ({
       classes,
@@ -539,6 +602,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionsWithDetails,
       getSessionAttendanceRecords,
       getPractitioners,
+      permissions,
+      currentStudentId,
+      setCurrentStudentId,
+      addPermission,
+      getPermissionsByUser,
+      updatePermissionStatus,
     }),
     [
       classes,
@@ -566,6 +635,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionsWithDetails,
       getSessionAttendanceRecords,
       getPractitioners,
+      permissions,
+      currentStudentId,
+      addPermission,
+      getPermissionsByUser,
+      updatePermissionStatus,
     ]
   );
 
