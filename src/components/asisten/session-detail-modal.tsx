@@ -18,6 +18,7 @@ interface SessionDetailModalProps {
   visible: boolean;
   onClose: () => void;
   onToggleStatus: (sessionId: string) => void;
+  onEditSession?: (session: SessionWithDetails) => void;
 }
 
 export function SessionDetailModal({
@@ -25,6 +26,7 @@ export function SessionDetailModal({
   visible,
   onClose,
   onToggleStatus,
+  onEditSession,
 }: SessionDetailModalProps) {
   if (!session) return null;
 
@@ -67,7 +69,7 @@ export function SessionDetailModal({
               <SessionStatusBadge status={status} />
             </View>
 
-            {/* Schedule Details (SRS-05) */}
+            {/* Schedule Details (SRS-05, SRS-07) */}
             <View style={styles.infoGroup}>
               <ThemedText type="smallBold" style={styles.sectionLabel}>
                 Informasi Jadwal & Laboratorium
@@ -79,6 +81,33 @@ export function SessionDetailModal({
                 </ThemedText>
                 <ThemedText type="smallBold">{schedule?.courseCode ?? '-'}</ThemedText>
               </View>
+
+              {schedule?.className ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Kelas
+                  </ThemedText>
+                  <ThemedText type="smallBold">{schedule.className}</ThemedText>
+                </View>
+              ) : null}
+
+              {schedule?.sessionNumber !== undefined ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Pertemuan Ke-
+                  </ThemedText>
+                  <ThemedText type="small">{schedule.sessionNumber}</ThemedText>
+                </View>
+              ) : null}
+
+              {schedule?.topic ? (
+                <View style={styles.infoRow}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
+                    Topik Materi
+                  </ThemedText>
+                  <ThemedText type="small" style={styles.topicValue}>{schedule.topic}</ThemedText>
+                </View>
+              ) : null}
 
               <View style={styles.infoRow}>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.infoLabel}>
@@ -140,8 +169,21 @@ export function SessionDetailModal({
             </View>
           </ScrollView>
 
-          {/* Action Footer (SRS-06) */}
+          {/* Action Footer (SRS-06, SRS-07) */}
           <View style={styles.footer}>
+            {onEditSession ? (
+              <Pressable
+                onPress={() => {
+                  onClose();
+                  onEditSession(session);
+                }}
+                style={styles.editModalButton}>
+                <ThemedText type="smallBold" style={styles.editModalButtonText}>
+                  ✏️ Edit Jadwal
+                </ThemedText>
+              </Pressable>
+            ) : null}
+
             <Pressable
               onPress={handleToggle}
               style={[
@@ -245,14 +287,36 @@ const styles = StyleSheet.create({
   infoLabel: {
     flex: 1,
   },
+  topicValue: {
+    flex: 1.5,
+    textAlign: 'right',
+  },
   footer: {
+    flexDirection: 'row',
+    gap: Spacing.two,
     padding: Spacing.four,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
   },
-  actionButton: {
+  editModalButton: {
+    flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  editModalButtonText: {
+    color: '#0369A1',
+  },
+  actionButton: {
+    flex: 1.4,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
