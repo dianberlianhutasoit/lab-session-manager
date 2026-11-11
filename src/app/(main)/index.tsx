@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -28,6 +29,7 @@ import {
   useSessionContext,
   SessionWithDetails,
 } from '@/context/session-context';
+<<<<<<< HEAD:src/app/index.tsx
 import type {
   LabClass,
   LabClassFormInput,
@@ -35,6 +37,9 @@ import type {
 } from '@/types';
 
 type ManagementSubTab = 'SESSIONS' | 'CLASSES';
+=======
+import { useAuth } from '@/context/auth-context';
+>>>>>>> 08159ee2e91b25553ccb9a14adf5343453de15d8:src/app/(main)/index.tsx
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -54,6 +59,8 @@ export default function HomeScreen() {
     getClassesWithDetails,
     getSessionsWithDetails,
   } = useSessionContext();
+  const { profile, logout } = useAuth();
+  const { loading, error } = useSessionContext();
 
   const [activeSubTab, setActiveSubTab] = useState<ManagementSubTab>('SESSIONS');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
@@ -225,8 +232,13 @@ export default function HomeScreen() {
             Manajemen Praktikum & Jadwal
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
+<<<<<<< HEAD:src/app/index.tsx
             SRS-07: Kelola data kelas praktikum (classes) serta jadwal sesi pertemuan (sessions), dan pantau status sesi secara real-time.
+=======
+            Halo, {profile?.name ?? 'Asisten'}. Pantau sesi dan kehadiran praktikan.
+>>>>>>> 08159ee2e91b25553ccb9a14adf5343453de15d8:src/app/(main)/index.tsx
           </ThemedText>
+          <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
         </View>
 
         {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas (SRS-07) */}
@@ -321,6 +333,7 @@ export default function HomeScreen() {
               <ThemedText type="subtitle" style={styles.listTitle}>
                 Master Kelas Praktikum ({filteredClasses.length})
               </ThemedText>
+<<<<<<< HEAD:src/app/index.tsx
 
               <Pressable
                 onPress={handleOpenCreateClass}
@@ -354,6 +367,23 @@ export default function HomeScreen() {
             )}
           </View>
         )}
+=======
+              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                {loading ? 'Memuat sesi…' : error ?? 'Sesi yang tersedia akan muncul di sini.'}
+              </ThemedText>
+            </ThemedView>
+          ) : (
+            filteredSessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                onOpenDetail={handleOpenDetail}
+                onToggleStatus={handleToggleStatus}
+              />
+            ))
+          )}
+        </View>
+>>>>>>> 08159ee2e91b25553ccb9a14adf5343453de15d8:src/app/(main)/index.tsx
       </View>
 
       {/* Modal Detail Sesi Praktikum */}

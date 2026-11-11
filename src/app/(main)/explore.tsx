@@ -121,7 +121,7 @@ export default function AttendanceRecapScreen() {
             Rekap Presensi Praktikan
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-08: Pantau data kehadiran, waktu presensi, dan daftar praktikan pada setiap sesi praktikum.
+            Pantau data kehadiran pada setiap sesi praktikum.
           </ThemedText>
         </View>
 
