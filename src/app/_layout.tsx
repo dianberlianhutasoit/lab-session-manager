@@ -4,6 +4,8 @@ import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { ErrorBoundary } from '@/components/common/error-boundary';
+import { OfflineBanner } from '@/components/common/offline-banner';
 import { SessionProvider } from '@/context/session-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -11,11 +13,14 @@ SplashScreen.preventAutoHideAsync();
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <SessionProvider>
-        <AnimatedSplashOverlay />
-        <AppTabs />
-      </SessionProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <SessionProvider>
+          <AnimatedSplashOverlay />
+          <OfflineBanner />
+          <AppTabs />
+        </SessionProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
