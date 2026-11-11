@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -15,11 +15,30 @@ import { SessionStatusBadge } from '@/components/asisten/session-status-badge';
 import { AttendanceSummaryCards } from '@/components/asisten/attendance-summary-cards';
 import { AttendanceRecordCard } from '@/components/asisten/attendance-record-card';
 import { AbsentPractitionerCard } from '@/components/asisten/absent-practitioner-card';
+import { LeaveRequestCard } from '@/components/asisten/leave-request-card';
+import { LeaveReviewModal } from '@/components/asisten/leave-review-modal';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useSessionContext } from '@/context/session-context';
+import { isFirebaseConfigured } from '@/config/firebase';
+import {
+  subscribeToSessionAttendance,
+  subscribeToSessionLeaveRequests,
+} from '@/services/firestore-service';
+import type { LeaveRequest, LeaveStatus } from '@/types';
 
-type ViewTab = 'PRESENT' | 'ABSENT';
+type ViewTab = 'PRESENT' | 'LEAVES' | 'ABSENT';
+type LeaveFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
+
+function formatSyncTime(isoString: string): string {
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${d.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })} WIB`;
+}
 
 export default function AttendanceRecapScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -29,22 +48,55 @@ export default function AttendanceRecapScreen() {
     sessions,
     schedules,
     users,
+    reviewingLeaveIds,
+    lastRealtimeSyncAt,
+    realtimeEventCount,
+    isFirestoreConnected,
+    currentAssistantId,
     getSessionAttendanceRecords,
+    getSessionLeaveRequests,
+    reviewLeaveRequest,
     getPractitioners,
   } = useSessionContext();
 
-  // Pilih sesi default (jika ada sesi dengan attendance, utamakan)
   const [selectedSessionId, setSelectedSessionId] = useState<string>(() => {
     return sessions.length > 0 ? sessions[0].id : '';
   });
 
   const [activeTab, setActiveTab] = useState<ViewTab>('PRESENT');
+  const [leaveFilter, setLeaveFilter] = useState<LeaveFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeReviewRequest, setActiveReviewRequest] = useState<LeaveRequest | null>(
+    null
+  );
+  const [sessionRealtimeTick, setSessionRealtimeTick] = useState<string | null>(null);
+
+  // SRS-09: Berlangganan spesifik per sesi dengan query + onSnapshot saat sesi dipilih
+  useEffect(() => {
+    if (!isFirebaseConfigured || !selectedSessionId) return;
+
+    const unsubAtt = subscribeToSessionAttendance(selectedSessionId, () => {
+      setSessionRealtimeTick(new Date().toISOString());
+    });
+
+    const unsubLeaves = subscribeToSessionLeaveRequests(selectedSessionId, () => {
+      setSessionRealtimeTick(new Date().toISOString());
+    });
+
+    return () => {
+      unsubAtt?.();
+      unsubLeaves?.();
+    };
+  }, [selectedSessionId]);
+
+  const effectiveSyncTimestamp = sessionRealtimeTick ?? lastRealtimeSyncAt;
 
   // Info sesi terpilih
   const selectedSession = useMemo(() => {
-    return sessions.find((s) => s.id === selectedSessionId);
+    return sessions.find((s) => s.id === selectedSessionId) ?? sessions[0];
   }, [sessions, selectedSessionId]);
+
+  const effectiveSessionId = selectedSession?.id ?? '';
 
   const selectedSchedule = useMemo(() => {
     if (!selectedSession) return undefined;
@@ -56,43 +108,116 @@ export default function AttendanceRecapScreen() {
     return users.find((u) => u.id === selectedSession.assistantId);
   }, [users, selectedSession]);
 
-  // Daftar data presensi praktikan pada sesi terpilih (SRS-08)
+  // SRS-09: Daftar data presensi praktikan pada sesi terpilih
   const attendanceRecords = useMemo(() => {
-    if (!selectedSessionId) return [];
-    return getSessionAttendanceRecords(selectedSessionId);
-  }, [selectedSessionId, getSessionAttendanceRecords]);
+    if (!effectiveSessionId) return [];
+    return getSessionAttendanceRecords(effectiveSessionId);
+  }, [effectiveSessionId, getSessionAttendanceRecords]);
+
+  // SRS-10: Daftar pengajuan izin praktikan pada sesi terpilih
+  const sessionLeaveRequests = useMemo(() => {
+    if (!effectiveSessionId) return [];
+    return getSessionLeaveRequests(effectiveSessionId);
+  }, [effectiveSessionId, getSessionLeaveRequests]);
+
+  const presentUserIds = useMemo(
+    () => new Set(attendanceRecords.map((a) => a.userId)),
+    [attendanceRecords]
+  );
+
+  // Peta status izin per userId pada sesi ini
+  const leaveStatusByUserId = useMemo(() => {
+    const map = new Map<string, LeaveStatus>();
+    for (const req of sessionLeaveRequests) {
+      map.set(req.userId, req.status);
+    }
+    return map;
+  }, [sessionLeaveRequests]);
+
+  // Praktikan yang izinnya APPROVED dan tidak melakukan presensi hadir (Status Hadir diutamakan jika tetap datang)
+  const approvedExcusedUserIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const req of sessionLeaveRequests) {
+      if (req.status === 'APPROVED' && !presentUserIds.has(req.userId)) {
+        set.add(req.userId);
+      }
+    }
+    return set;
+  }, [sessionLeaveRequests, presentUserIds]);
+
+  const pendingLeaveCount = useMemo(
+    () => sessionLeaveRequests.filter((l) => l.status === 'PENDING').length,
+    [sessionLeaveRequests]
+  );
 
   // Daftar seluruh praktikan terdaftar
   const allPractitioners = useMemo(() => {
     return getPractitioners();
   }, [getPractitioners]);
 
-  // Daftar praktikan yang belum presensi pada sesi terpilih
+  // Daftar praktikan yang belum hadir (tidak presensi DAN tidak memiliki izin APPROVED)
   const absentPractitioners = useMemo(() => {
-    const presentUserIds = new Set(attendanceRecords.map((a) => a.userId));
-    return allPractitioners.filter((p) => !presentUserIds.has(p.id));
-  }, [allPractitioners, attendanceRecords]);
+    return allPractitioners.filter(
+      (p) => !presentUserIds.has(p.id) && !approvedExcusedUserIds.has(p.id)
+    );
+  }, [allPractitioners, presentUserIds, approvedExcusedUserIds]);
 
   // Filter berdasarkan teks pencarian
   const filteredPresent = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return attendanceRecords;
+    const queryText = searchQuery.trim().toLowerCase();
+    if (!queryText) return attendanceRecords;
     return attendanceRecords.filter(
       (a) =>
-        a.userName.toLowerCase().includes(query) ||
-        a.userEmail.toLowerCase().includes(query)
+        a.userName.toLowerCase().includes(queryText) ||
+        a.userEmail.toLowerCase().includes(queryText)
     );
   }, [attendanceRecords, searchQuery]);
 
   const filteredAbsent = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return absentPractitioners;
+    const queryText = searchQuery.trim().toLowerCase();
+    if (!queryText) return absentPractitioners;
     return absentPractitioners.filter(
       (p) =>
-        p.name.toLowerCase().includes(query) ||
-        p.email.toLowerCase().includes(query)
+        p.name.toLowerCase().includes(queryText) ||
+        p.email.toLowerCase().includes(queryText)
     );
   }, [absentPractitioners, searchQuery]);
+
+  const filteredLeaves = useMemo(() => {
+    const queryText = searchQuery.trim().toLowerCase();
+    return sessionLeaveRequests.filter((l) => {
+      const matchFilter = leaveFilter === 'ALL' || l.status === leaveFilter;
+      const matchQuery =
+        !queryText ||
+        l.userName.toLowerCase().includes(queryText) ||
+        l.userEmail.toLowerCase().includes(queryText) ||
+        l.reason.toLowerCase().includes(queryText);
+      return matchFilter && matchQuery;
+    });
+  }, [sessionLeaveRequests, leaveFilter, searchQuery]);
+
+  // Sinkronkan modal peninjauan izin jika datanya berubah
+  const currentReviewModalRequest = useMemo(() => {
+    if (!activeReviewRequest) return null;
+    return (
+      sessionLeaveRequests.find((l) => l.id === activeReviewRequest.id) ?? null
+    );
+  }, [sessionLeaveRequests, activeReviewRequest]);
+
+  const handleQuickDecision = async (
+    requestId: string,
+    decision: Exclude<LeaveStatus, 'PENDING'>
+  ) => {
+    await reviewLeaveRequest(requestId, decision, undefined, currentAssistantId);
+  };
+
+  const handleSubmitModalDecision = async (
+    requestId: string,
+    decision: Exclude<LeaveStatus, 'PENDING'>,
+    reviewerNote?: string
+  ) => {
+    await reviewLeaveRequest(requestId, decision, reviewerNote, currentAssistantId);
+  };
 
   const insets = {
     ...safeAreaInsets,
@@ -112,17 +237,36 @@ export default function AttendanceRecapScreen() {
       <View style={styles.container}>
         {/* Header Title Section */}
         <View style={styles.header}>
-          <View style={styles.badgeRole}>
-            <ThemedText type="smallBold" style={styles.badgeRoleText}>
-              PANEL ASISTEN LABORATORIUM
-            </ThemedText>
+          <View style={styles.headerTopRow}>
+            <View style={styles.badgeRole}>
+              <ThemedText type="smallBold" style={styles.badgeRoleText}>
+                PANEL ASISTEN LABORATORIUM
+              </ThemedText>
+            </View>
+
+            {/* SRS-09: Indikator Real-Time Listener onSnapshot */}
+            <View style={styles.realtimeBadge}>
+              <View style={styles.pulseDot} />
+              <ThemedText type="smallBold" style={styles.realtimeBadgeText}>
+                {isFirestoreConnected
+                  ? 'onSnapshot Live (Firestore)'
+                  : 'onSnapshot Ready'}
+              </ThemedText>
+            </View>
           </View>
+
           <ThemedText type="title" style={styles.title}>
-            Rekap Presensi Praktikan
+            Rekap Presensi & Keputusan Izin
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-08: Pantau data kehadiran, waktu presensi, dan daftar praktikan pada setiap sesi praktikum.
+            SRS-09 & SRS-10: Pantau rekap presensi real-time berbasis onSnapshot serta tinjau dan putuskan permohonan izin praktikan (APPROVED/REJECTED).
           </ThemedText>
+
+          <View style={styles.syncMetaBar}>
+            <ThemedText type="small" style={styles.syncMetaText}>
+              🔄 Sinkronisasi Real-Time Terakhir: {formatSyncTime(effectiveSyncTimestamp)} ({realtimeEventCount} pembaruan)
+            </ThemedText>
+          </View>
         </View>
 
         {/* Horizontal Session Selector */}
@@ -136,7 +280,10 @@ export default function AttendanceRecapScreen() {
             contentContainerStyle={styles.sessionPillsScroll}>
             {sessions.map((sess) => {
               const sch = schedules.find((s) => s.id === sess.scheduleId);
-              const isSelected = sess.id === selectedSessionId;
+              const isSelected = sess.id === effectiveSessionId;
+              const sessPendingLeaves = getSessionLeaveRequests(sess.id).filter(
+                (l) => l.status === 'PENDING'
+              ).length;
 
               return (
                 <Pressable
@@ -163,6 +310,13 @@ export default function AttendanceRecapScreen() {
                     numberOfLines={1}>
                     {sch?.title ?? 'Sesi'}
                   </ThemedText>
+                  {sessPendingLeaves > 0 ? (
+                    <View style={styles.pendingPillCounter}>
+                      <ThemedText type="smallBold" style={styles.pendingPillCounterText}>
+                        {sessPendingLeaves} Izin
+                      </ThemedText>
+                    </View>
+                  ) : null}
                   <View
                     style={[
                       styles.dotStatus,
@@ -182,6 +336,7 @@ export default function AttendanceRecapScreen() {
               <View style={styles.bannerTitleCol}>
                 <ThemedText type="small" style={styles.courseCodeText}>
                   {selectedSchedule.courseCode}
+                  {selectedSchedule.className ? ` • ${selectedSchedule.className}` : ''}
                 </ThemedText>
                 <ThemedText type="subtitle" style={styles.courseTitleText}>
                   {selectedSchedule.title}
@@ -204,16 +359,19 @@ export default function AttendanceRecapScreen() {
           </ThemedView>
         )}
 
-        {/* Summary Metrics Cards (SRS-08) */}
+        {/* Summary Metrics Cards (SRS-09 & SRS-10) */}
         {selectedSession && (
           <AttendanceSummaryCards
             presentCount={attendanceRecords.length}
+            approvedLeaveCount={approvedExcusedUserIds.size}
+            pendingLeaveCount={pendingLeaveCount}
+            absentCount={absentPractitioners.length}
             totalStudents={allPractitioners.length}
             sessionStatus={selectedSession.status}
           />
         )}
 
-        {/* Search Bar & Tab Filter */}
+        {/* Search Bar & 3-Tab Filter (Hadir | Pengajuan Izin | Belum Hadir) */}
         <View style={styles.listSection}>
           <View style={styles.searchContainer}>
             <ThemedText style={styles.searchIcon}>🔍</ThemedText>
@@ -222,7 +380,7 @@ export default function AttendanceRecapScreen() {
                 styles.searchInput,
                 { color: theme.text, backgroundColor: 'transparent' },
               ]}
-              placeholder="Cari nama atau email praktikan..."
+              placeholder="Cari nama, email, atau alasan izin..."
               placeholderTextColor="#94A3B8"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -250,6 +408,20 @@ export default function AttendanceRecapScreen() {
             </Pressable>
 
             <Pressable
+              onPress={() => setActiveTab('LEAVES')}
+              style={[styles.tabItem, activeTab === 'LEAVES' && styles.tabItemActive]}>
+              <ThemedText
+                type="smallBold"
+                style={[
+                  styles.tabItemText,
+                  activeTab === 'LEAVES' && styles.tabItemTextActive,
+                ]}>
+                📋 Izin ({sessionLeaveRequests.length})
+                {pendingLeaveCount > 0 ? ` • ${pendingLeaveCount} Baru` : ''}
+              </ThemedText>
+            </Pressable>
+
+            <Pressable
               onPress={() => setActiveTab('ABSENT')}
               style={[styles.tabItem, activeTab === 'ABSENT' && styles.tabItemActive]}>
               <ThemedText
@@ -262,6 +434,52 @@ export default function AttendanceRecapScreen() {
               </ThemedText>
             </Pressable>
           </View>
+
+          {/* Sub-Filter Status Izin pada Tab LEAVES (SRS-10) */}
+          {activeTab === 'LEAVES' ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.leaveFilterRow}>
+              {(
+                [
+                  { key: 'ALL', label: `Semua (${sessionLeaveRequests.length})` },
+                  {
+                    key: 'PENDING',
+                    label: `⏳ Menunggu (${sessionLeaveRequests.filter((l) => l.status === 'PENDING').length})`,
+                  },
+                  {
+                    key: 'APPROVED',
+                    label: `✅ Disetujui (${sessionLeaveRequests.filter((l) => l.status === 'APPROVED').length})`,
+                  },
+                  {
+                    key: 'REJECTED',
+                    label: `❌ Ditolak (${sessionLeaveRequests.filter((l) => l.status === 'REJECTED').length})`,
+                  },
+                ] as { key: LeaveFilter; label: string }[]
+              ).map((item) => {
+                const isSelected = leaveFilter === item.key;
+                return (
+                  <Pressable
+                    key={item.key}
+                    onPress={() => setLeaveFilter(item.key)}
+                    style={[
+                      styles.leaveFilterPill,
+                      isSelected && styles.leaveFilterPillActive,
+                    ]}>
+                    <ThemedText
+                      type="smallBold"
+                      style={[
+                        styles.leaveFilterText,
+                        isSelected && styles.leaveFilterTextActive,
+                      ]}>
+                      {item.label}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
 
           {/* List Content */}
           <View style={styles.recordsList}>
@@ -285,24 +503,66 @@ export default function AttendanceRecapScreen() {
                   <AttendanceRecordCard key={rec.id} record={rec} index={index} />
                 ))
               )
+            ) : activeTab === 'LEAVES' ? (
+              filteredLeaves.length === 0 ? (
+                <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                  <ThemedText style={styles.emptyIcon}>📨</ThemedText>
+                  <ThemedText type="subtitle" style={styles.emptyTitle}>
+                    Tidak ada pengajuan izin
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                    Tidak ada permohonan izin praktikan yang sesuai dengan filter pada sesi ini.
+                  </ThemedText>
+                </ThemedView>
+              ) : (
+                filteredLeaves.map((req) => (
+                  <LeaveRequestCard
+                    key={req.id}
+                    request={req}
+                    isPresentInSession={presentUserIds.has(req.userId)}
+                    isReviewing={reviewingLeaveIds.includes(req.id)}
+                    onQuickDecision={handleQuickDecision}
+                    onOpenReviewModal={setActiveReviewRequest}
+                  />
+                ))
+              )
             ) : filteredAbsent.length === 0 ? (
               <ThemedView type="backgroundElement" style={styles.emptyContainer}>
                 <ThemedText style={styles.emptyIcon}>🎉</ThemedText>
                 <ThemedText type="subtitle" style={styles.emptyTitle}>
-                  Semua praktikan telah hadir
+                  Semua praktikan telah hadir / terkonfirmasi izin
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Seluruh praktikan terdaftar sudah tercatat presensi untuk sesi ini.
+                  Seluruh praktikan terdaftar sudah tercatat hadir atau memiliki izin yang disetujui (APPROVED) pada sesi ini.
                 </ThemedText>
               </ThemedView>
             ) : (
               filteredAbsent.map((student, index) => (
-                <AbsentPractitionerCard key={student.id} user={student} index={index} />
+                <AbsentPractitionerCard
+                  key={student.id}
+                  user={student}
+                  index={index}
+                  leaveStatus={leaveStatusByUserId.get(student.id)}
+                />
               ))
             )}
           </View>
         </View>
       </View>
+
+      {/* Modal Peninjauan & Keputusan Izin (SRS-10) */}
+      <LeaveReviewModal
+        visible={!!currentReviewModalRequest}
+        request={currentReviewModalRequest}
+        sessionTitle={selectedSchedule?.title}
+        isSubmitting={
+          currentReviewModalRequest
+            ? reviewingLeaveIds.includes(currentReviewModalRequest.id)
+            : false
+        }
+        onClose={() => setActiveReviewRequest(null)}
+        onSubmitDecision={handleSubmitModalDecision}
+      />
     </ScrollView>
   );
 }
@@ -324,6 +584,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: Spacing.two,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   badgeRole: {
     backgroundColor: '#EEF2FF',
     paddingHorizontal: 10,
@@ -336,9 +603,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.5,
   },
+  realtimeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  pulseDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#16A34A',
+  },
+  realtimeBadgeText: {
+    color: '#15803D',
+    fontSize: 11,
+  },
   title: {
     fontSize: 26,
     lineHeight: 32,
+  },
+  syncMetaBar: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  syncMetaText: {
+    color: '#0369A1',
+    fontSize: 11,
   },
   selectorWrapper: {
     gap: 8,
@@ -372,10 +673,20 @@ const styles = StyleSheet.create({
   sessionPillTitle: {
     color: '#334155',
     fontSize: 13,
-    maxWidth: 160,
+    maxWidth: 150,
   },
   sessionPillTextActive: {
     color: '#FFFFFF',
+  },
+  pendingPillCounter: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  pendingPillCounterText: {
+    color: '#B45309',
+    fontSize: 10,
   },
   dotStatus: {
     width: 7,
@@ -459,7 +770,9 @@ const styles = StyleSheet.create({
   tabItem: {
     flex: 1,
     paddingVertical: 8,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 8,
     ...Platform.select({
       web: { cursor: 'pointer' },
@@ -475,10 +788,37 @@ const styles = StyleSheet.create({
   },
   tabItemText: {
     color: '#64748B',
-    fontSize: 12,
+    fontSize: 11,
+    textAlign: 'center',
   },
   tabItemTextActive: {
     color: '#0F172A',
+  },
+  leaveFilterRow: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  leaveFilterPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  leaveFilterPillActive: {
+    backgroundColor: '#0284C7',
+    borderColor: '#0284C7',
+  },
+  leaveFilterText: {
+    color: '#475569',
+    fontSize: 11,
+  },
+  leaveFilterTextActive: {
+    color: '#FFFFFF',
   },
   recordsList: {
     gap: Spacing.two,

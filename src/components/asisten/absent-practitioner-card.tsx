@@ -3,14 +3,19 @@ import { View, StyleSheet } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import type { User } from '@/types';
+import type { LeaveStatus, User } from '@/types';
 
 interface AbsentPractitionerCardProps {
   user: User;
   index: number;
+  leaveStatus?: LeaveStatus;
 }
 
-export function AbsentPractitionerCard({ user, index }: AbsentPractitionerCardProps) {
+export function AbsentPractitionerCard({
+  user,
+  index,
+  leaveStatus,
+}: AbsentPractitionerCardProps) {
   const initial = user.name.charAt(0).toUpperCase();
 
   return (
@@ -34,6 +39,15 @@ export function AbsentPractitionerCard({ user, index }: AbsentPractitionerCardPr
         <ThemedText type="small" themeColor="textSecondary" style={styles.emailText}>
           {user.email}
         </ThemedText>
+        {leaveStatus === 'PENDING' ? (
+          <ThemedText type="small" style={styles.pendingHint}>
+            ⏳ Mengajukan izin (Menunggu keputusan asisten)
+          </ThemedText>
+        ) : leaveStatus === 'REJECTED' ? (
+          <ThemedText type="small" style={styles.rejectedHint}>
+            ❌ Pengajuan izin ditolak (Dihitung belum hadir)
+          </ThemedText>
+        ) : null}
       </View>
 
       <View style={styles.statusBadge}>
@@ -54,7 +68,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.05)',
-    opacity: 0.85,
+    opacity: 0.9,
   },
   numberBadge: {
     width: 28,
@@ -85,6 +99,16 @@ const styles = StyleSheet.create({
   },
   emailText: {
     fontSize: 12,
+  },
+  pendingHint: {
+    color: '#D97706',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  rejectedHint: {
+    color: '#DC2626',
+    fontSize: 11,
+    marginTop: 2,
   },
   statusBadge: {
     backgroundColor: '#F1F5F9',
