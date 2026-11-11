@@ -1,4 +1,4 @@
-import type { Attendance, Permission, Schedule, Session, User } from "../types";
+import type { Attendance, LabClass, Permission, Schedule, Session, User } from "../types";
 
 export const users: User[] = [
   {
@@ -33,9 +33,46 @@ export const users: User[] = [
   },
 ];
 
+export const classes: LabClass[] = [
+  {
+    id: "class-001",
+    courseCode: "LAB101",
+    title: "Dasar Pemrograman",
+    className: "Kelas A",
+    room: "Lab Komputer 1",
+    assistantId: "user-asisten-001",
+    semester: "Ganjil 2026/2027",
+    capacity: 30,
+  },
+  {
+    id: "class-002",
+    courseCode: "LAB204",
+    title: "Basis Data",
+    className: "Kelas B",
+    room: "Lab Komputer 2",
+    assistantId: "user-asisten-002",
+    semester: "Ganjil 2026/2027",
+    capacity: 25,
+  },
+  {
+    id: "class-003",
+    courseCode: "LAB305",
+    title: "Jaringan Komputer",
+    className: "Kelas A",
+    room: "Lab Jaringan",
+    assistantId: "user-asisten-001",
+    semester: "Ganjil 2026/2027",
+    capacity: 30,
+  },
+];
+
 export const schedules: Schedule[] = [
   {
     id: "schedule-001",
+    classId: "class-001",
+    className: "Kelas A",
+    sessionNumber: 1,
+    topic: "Pengenalan Algoritma & Variabel",
     title: "Dasar Pemrograman",
     courseCode: "LAB101",
     date: "2026-10-26",
@@ -45,6 +82,10 @@ export const schedules: Schedule[] = [
   },
   {
     id: "schedule-002",
+    classId: "class-002",
+    className: "Kelas B",
+    sessionNumber: 1,
+    topic: "Pemodelan ERD & DDL SQL",
     title: "Basis Data",
     courseCode: "LAB204",
     date: "2026-10-27",
@@ -54,6 +95,10 @@ export const schedules: Schedule[] = [
   },
   {
     id: "schedule-003",
+    classId: "class-003",
+    className: "Kelas A",
+    sessionNumber: 1,
+    topic: "Subnetting IPv4 & Konfigurasi Router",
     title: "Jaringan Komputer",
     courseCode: "LAB305",
     date: "2026-10-28",
@@ -66,18 +111,21 @@ export const schedules: Schedule[] = [
 export const sessions: Session[] = [
   {
     id: "session-001",
+    classId: "class-001",
     scheduleId: "schedule-001",
     assistantId: "user-asisten-001",
     status: "OPEN",
   },
   {
     id: "session-002",
+    classId: "class-002",
     scheduleId: "schedule-002",
     assistantId: "user-asisten-002",
     status: "CLOSED",
   },
   {
     id: "session-003",
+    classId: "class-003",
     scheduleId: "schedule-003",
     assistantId: "user-asisten-001",
     status: "CLOSED",
