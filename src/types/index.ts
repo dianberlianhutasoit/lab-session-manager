@@ -92,7 +92,9 @@ export interface AttendanceRecord {
   recordedAt: string;
 }
 
-// --- SRS-11 s/d SRS-13: Modul Pengajuan Izin & Integrasi AI ---
+// --- Modul Pengajuan Izin & Integrasi AI Sentimen ---
+export type SentimentLabel = "positif" | "netral" | "negatif" | null;
+
 export type PermissionStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export type PermissionCategory =
@@ -109,7 +111,8 @@ export interface Permission {
   studentName: string;
   studentEmail: string;
   reason: string;
-  category: PermissionCategory;
+  sentiment?: SentimentLabel;
+  category?: PermissionCategory;
   aiAnalysis?: string;
   status: PermissionStatus;
   createdAt: string;

@@ -45,6 +45,7 @@ import type {
   Permission,
   PermissionCategory,
   PermissionStatus,
+  SentimentLabel,
   Schedule,
   Session,
   SessionScheduleFormInput,
@@ -124,6 +125,7 @@ interface SessionContextValue {
   addPermission: (data: {
     sessionId: string;
     reason: string;
+    sentiment?: SentimentLabel;
     category?: PermissionCategory;
     aiAnalysis?: string;
   }) => Permission;
@@ -877,11 +879,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
-  // SRS-11: Mengajukan izin baru
+  // Mengajukan izin baru dengan analisis AI sentimen
   const addPermission = useCallback(
     (data: {
       sessionId: string;
       reason: string;
+      sentiment?: SentimentLabel;
       category?: PermissionCategory;
       aiAnalysis?: string;
     }): Permission => {
@@ -893,7 +896,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         studentName: student?.name ?? 'Praktikan',
         studentEmail: student?.email ?? 'praktikan@example.test',
         reason: data.reason,
-        category: data.category ?? 'Unclassified',
+        sentiment: data.sentiment,
+        category: data.category,
         aiAnalysis: data.aiAnalysis,
         status: 'PENDING',
         createdAt: new Date().toISOString(),
