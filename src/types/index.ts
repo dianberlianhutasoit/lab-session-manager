@@ -2,6 +2,10 @@ export type Role = "praktikan" | "asisten";
 
 export type SessionStatus = "OPEN" | "CLOSED";
 
+export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type LeaveCategory = "SAKIT" | "DISPENSASI" | "IZIN_AKADEMIK" | "LAINNYA";
+
 export interface User {
   id: string;
   name: string;
@@ -109,6 +113,26 @@ export interface Permission {
   aiAnalysis?: string;
   status: PermissionStatus;
   createdAt: string;
+}
+
+/**
+ * SRS-10: Representasi Pengajuan Izin Praktikan (collection: leave_requests)
+ */
+export interface LeaveRequest {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  category: LeaveCategory;
+  reason: string;
+  attachmentName?: string;
+  status: LeaveStatus;
+  submittedAt: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  reviewerNote?: string;
 }
 
 /**

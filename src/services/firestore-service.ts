@@ -2,9 +2,12 @@ import {
   collection,
   doc,
   setDoc,
+  updateDoc,
   deleteDoc,
   getDocs,
   onSnapshot,
+  query,
+  where,
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -15,11 +18,14 @@ import {
   sessions as initialSessions,
   statusLogs as initialStatusLogs,
   attendance as initialAttendance,
+  leaveRequests as initialLeaveRequests,
   users as initialUsers,
 } from '@/data/dummy';
 import type {
   Attendance,
   LabClass,
+  LeaveRequest,
+  LeaveStatus,
   Schedule,
   Session,
   SessionStatus,
@@ -32,6 +38,7 @@ export const COLLECTIONS = {
   SESSIONS: 'sessions',
   STATUS_LOGS: 'session_status_logs',
   ATTENDANCE: 'attendance',
+  LEAVE_REQUESTS: 'leave_requests',
   USERS: 'users',
 } as const;
 
@@ -49,7 +56,7 @@ function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, a
 }
 
 /**
- * Berlangganan perubahan koleksi secara real-time dari Firestore
+ * Berlangganan perubahan koleksi secara real-time dari Firestore (onSnapshot)
  */
 export function subscribeToCollection<T>(
   collectionName: string,
@@ -70,6 +77,68 @@ export function subscribeToCollection<T>(
     },
     (error) => {
       console.warn(`[Firestore] Error listening to ${collectionName}:`, error);
+      onError?.(error);
+    }
+  );
+}
+
+/**
+ * SRS-09: Real-time listener presensi spesifik sesi menggunakan query + onSnapshot
+ */
+export function subscribeToSessionAttendance(
+  sessionId: string,
+  onData: (items: Attendance[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe | null {
+  if (!db || !sessionId) return null;
+
+  const q = query(
+    collection(db, COLLECTIONS.ATTENDANCE),
+    where('sessionId', '==', sessionId)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items: Attendance[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as Attendance);
+      });
+      onData(items);
+    },
+    (error) => {
+      console.warn(`[Firestore] Error listening to session attendance (${sessionId}):`, error);
+      onError?.(error);
+    }
+  );
+}
+
+/**
+ * SRS-09 & SRS-10: Real-time listener pengajuan izin spesifik sesi menggunakan query + onSnapshot
+ */
+export function subscribeToSessionLeaveRequests(
+  sessionId: string,
+  onData: (items: LeaveRequest[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe | null {
+  if (!db || !sessionId) return null;
+
+  const q = query(
+    collection(db, COLLECTIONS.LEAVE_REQUESTS),
+    where('sessionId', '==', sessionId)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items: LeaveRequest[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ id: docSnap.id, ...docSnap.data() } as LeaveRequest);
+      });
+      onData(items);
+    },
+    (error) => {
+      console.warn(`[Firestore] Error listening to session leave requests (${sessionId}):`, error);
       onError?.(error);
     }
   );
@@ -120,6 +189,10 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
 
     for (const att of initialAttendance) {
       batch.set(doc(db, COLLECTIONS.ATTENDANCE, att.id), stripUndefined(att));
+    }
+
+    for (const leave of initialLeaveRequests) {
+      batch.set(doc(db, COLLECTIONS.LEAVE_REQUESTS, leave.id), stripUndefined(leave));
     }
 
     await batch.commit();
@@ -334,4 +407,30 @@ export async function firestoreBatchCloseSessions(
 export async function firestoreRecordAttendance(record: Attendance): Promise<void> {
   if (!db) return;
   await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), stripUndefined(record));
+}
+
+/**
+ * SRS-10: Simpan keputusan peninjauan izin praktikan (APPROVED / REJECTED) di Firestore
+ */
+export async function firestoreReviewLeaveRequest(
+  requestId: string,
+  decision: Exclude<LeaveStatus, 'PENDING'>,
+  metadata: {
+    reviewedBy: string;
+    reviewedByName: string;
+    reviewedAt: string;
+    reviewerNote?: string;
+  }
+): Promise<void> {
+  if (!db) return;
+  await updateDoc(
+    doc(db, COLLECTIONS.LEAVE_REQUESTS, requestId),
+    stripUndefined({
+      status: decision,
+      reviewedBy: metadata.reviewedBy,
+      reviewedByName: metadata.reviewedByName,
+      reviewedAt: metadata.reviewedAt,
+      reviewerNote: metadata.reviewerNote,
+    })
+  );
 }

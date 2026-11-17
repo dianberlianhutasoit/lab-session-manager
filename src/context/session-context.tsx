@@ -15,6 +15,7 @@ import {
   sessions as initialSessions,
   statusLogs as initialStatusLogs,
   attendance as initialAttendance,
+  leaveRequests as initialLeaveRequests,
   permissions as initialPermissions,
 } from '@/data/dummy';
 import { isFirebaseConfigured } from '@/config/firebase';
@@ -31,6 +32,7 @@ import {
   firestoreUpdateSessionStatus,
   firestoreBatchCloseSessions,
   firestoreRecordAttendance,
+  firestoreReviewLeaveRequest,
 } from '@/services/firestore-service';
 import { useAuth } from '@/context/auth-context';
 import type {
@@ -38,6 +40,8 @@ import type {
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
+  LeaveRequest,
+  LeaveStatus,
   Permission,
   PermissionCategory,
   PermissionStatus,
@@ -65,6 +69,10 @@ interface SessionContextValue {
   updatingSessionIds: string[];
   users: User[];
   attendance: Attendance[];
+  leaveRequests: LeaveRequest[];
+  reviewingLeaveIds: string[];
+  lastRealtimeSyncAt: string;
+  realtimeEventCount: number;
   loading: boolean;
   error: string | null;
   isFirestoreConnected: boolean;
@@ -91,7 +99,15 @@ interface SessionContextValue {
   ) => Promise<number>;
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
+  // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
   recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
+  reviewLeaveRequest: (
+    requestId: string,
+    decision: Exclude<LeaveStatus, 'PENDING'>,
+    reviewerNote?: string,
+    actorAssistantId?: string
+  ) => Promise<boolean>;
+  getSessionLeaveRequests: (sessionId: string) => LeaveRequest[];
   // Helper queries
   getClassById: (classId: string) => LabClass | undefined;
   getScheduleById: (scheduleId: string) => Schedule | undefined;
@@ -99,7 +115,6 @@ interface SessionContextValue {
   getAttendanceCount: (sessionId: string) => number;
   getClassesWithDetails: () => LabClassWithDetails[];
   getSessionsWithDetails: () => SessionWithDetails[];
-  // Rekap Presensi Praktikan
   getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
   getPractitioners: () => User[];
   // SRS-11 s/d SRS-13: Pengajuan Izin & Integrasi AI
@@ -128,6 +143,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
+  const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
+  const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(
+    () => new Date().toISOString()
+  );
+  const [realtimeEventCount, setRealtimeEventCount] = useState<number>(1);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -152,7 +173,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     attendanceRef.current = attendance;
   }, [attendance]);
 
-  // Sinkronisasi real-time dengan Firebase Firestore jika dikonfigurasi
+  const markRealtimeSync = useCallback(() => {
+    setLastRealtimeSyncAt(new Date().toISOString());
+    setRealtimeEventCount((prev) => prev + 1);
+  }, []);
+
+  // SRS-09: Sinkronisasi real-time berbasis onSnapshot dengan Firebase Firestore
   useEffect(() => {
     if (!isFirebaseConfigured) {
       return;
@@ -182,7 +208,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     });
 
     const unsubSessions = subscribeToCollection<Session>(COLLECTIONS.SESSIONS, (items) => {
-      if (items.length > 0) setSessions(items);
+      if (items.length > 0) {
+        setSessions(items);
+        markRealtimeSync();
+      }
     });
 
     const unsubLogs = subscribeToCollection<SessionStatusLog>(
@@ -199,7 +228,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     const unsubAttendance = subscribeToCollection<Attendance>(COLLECTIONS.ATTENDANCE, (items) => {
       setAttendance(items);
+      markRealtimeSync();
     });
+
+    const unsubLeaves = subscribeToCollection<LeaveRequest>(
+      COLLECTIONS.LEAVE_REQUESTS,
+      (items) => {
+        if (items.length > 0) {
+          const sorted = [...items].sort((a, b) =>
+            b.submittedAt.localeCompare(a.submittedAt)
+          );
+          setLeaveRequests(sorted);
+          markRealtimeSync();
+        }
+      }
+    );
 
     const unsubUsers = subscribeToCollection<User>(COLLECTIONS.USERS, (items) => {
       if (items.length > 0) setUsers(items);
@@ -212,9 +255,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubSessions?.();
       unsubLogs?.();
       unsubAttendance?.();
+      unsubLeaves?.();
       unsubUsers?.();
     };
-  }, []);
+  }, [markRealtimeSync]);
 
   // SRS-07: Create Kelas Praktikum
   const createClass = useCallback(async (input: LabClassFormInput): Promise<LabClass> => {
@@ -360,6 +404,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       setSchedules((prev) => [...prev, newSchedule]);
       setSessions((prev) => [...prev, newSession]);
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreCreateSessionAndSchedule(newSchedule, newSession);
@@ -373,7 +418,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         attendanceCount: 0,
       };
     },
-    [users]
+    [users, markRealtimeSync]
   );
 
   // SRS-07: Update Sesi & Jadwal Praktikum
@@ -422,6 +467,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSchedules((prev) =>
         prev.map((sch) => (sch.id === scheduleId ? { ...sch, ...scheduleUpdates } : sch))
       );
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreUpdateSessionAndSchedule(
@@ -434,7 +480,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions]
+    [sessions, markRealtimeSync]
   );
 
   // SRS-07: Delete Sesi & Jadwal Praktikum
@@ -451,7 +497,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       setSchedules((prev) => prev.filter((sch) => sch.id !== scheduleId));
       setAttendance((prev) => prev.filter((a) => a.sessionId !== sessionId));
+      setLeaveRequests((prev) => prev.filter((l) => l.sessionId !== sessionId));
       setStatusLogs((prev) => prev.filter((log) => log.sessionId !== sessionId));
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreDeleteSessionAndSchedule(
@@ -463,7 +511,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions, attendance]
+    [sessions, attendance, markRealtimeSync]
   );
 
   // SRS-08: Fungsi inti transisi status sesi dengan audit log, loading state & rollback
@@ -506,7 +554,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.includes(sessionId) ? prev : [...prev, sessionId]
       );
 
-      // Optimistic UI update
       setSessions((prev) =>
         prev.map((s) =>
           s.id === sessionId
@@ -520,6 +567,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         )
       );
       setStatusLogs((prev) => [newLog, ...prev]);
+      markRealtimeSync();
 
       try {
         if (isFirebaseConfigured) {
@@ -527,7 +575,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
         return true;
       } catch (err) {
-        // Rollback pada kegagalan Firestore
         console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
         setSessions((prev) =>
           prev.map((s) => (s.id === sessionId ? existing : s))
@@ -538,10 +585,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
       }
     },
-    [sessions, users, currentAssistantId]
+    [sessions, users, currentAssistantId, markRealtimeSync]
   );
 
-  // SRS-08: Membuka sesi praktikum (CLOSED -> OPEN)
   const openSession = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
       return changeSessionStatus(sessionId, 'OPEN', actorAssistantId);
@@ -549,7 +595,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [changeSessionStatus]
   );
 
-  // SRS-08: Menutup sesi praktikum (OPEN -> CLOSED)
   const closeSession = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
       return changeSessionStatus(sessionId, 'CLOSED', actorAssistantId);
@@ -557,7 +602,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [changeSessionStatus]
   );
 
-  // SRS-08: Toggle status sesi praktikum (OPEN <-> CLOSED)
   const toggleSessionStatus = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
       const target = sessions.find((s) => s.id === sessionId);
@@ -568,7 +612,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [sessions, changeSessionStatus]
   );
 
-  // SRS-08: Tutup semua sesi yang sedang OPEN sekaligus (Batch Close)
   const closeAllOpenSessions = useCallback(
     async (
       assistantIdFilter?: string,
@@ -620,6 +663,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         )
       );
       setStatusLogs((prev) => [...newLogs, ...prev]);
+      markRealtimeSync();
 
       try {
         if (isFirebaseConfigured) {
@@ -643,7 +687,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [sessions, users, currentAssistantId]
+    [sessions, users, currentAssistantId, markRealtimeSync]
   );
 
   const isSessionUpdating = useCallback(
@@ -657,6 +701,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [statusLogs]
   );
 
+  // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
     async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
       const targetSession = sessions.find((s) => s.id === sessionId);
@@ -679,6 +724,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreRecordAttendance(newRecord);
@@ -686,7 +732,76 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions]
+    [sessions, markRealtimeSync]
+  );
+
+  // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
+  const reviewLeaveRequest = useCallback(
+    async (
+      requestId: string,
+      decision: Exclude<LeaveStatus, 'PENDING'>,
+      reviewerNote?: string,
+      actorAssistantId?: string
+    ): Promise<boolean> => {
+      const existing = leaveRequests.find((l) => l.id === requestId);
+      if (!existing) return false;
+
+      const now = new Date().toISOString();
+      const sessionOfRequest = sessions.find((s) => s.id === existing.sessionId);
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : sessionOfRequest?.assistantId || currentAssistantId;
+
+      const reviewerUser = users.find((u) => u.id === effectiveActorId);
+      const trimmedNote = reviewerNote?.trim() || undefined;
+
+      const metadata = {
+        reviewedBy: effectiveActorId,
+        reviewedByName: reviewerUser?.name ?? 'Asisten Lab',
+        reviewedAt: now,
+        reviewerNote: trimmedNote,
+      };
+
+      setReviewingLeaveIds((prev) =>
+        prev.includes(requestId) ? prev : [...prev, requestId]
+      );
+
+      setLeaveRequests((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: decision,
+                ...metadata,
+              }
+            : item
+        )
+      );
+      markRealtimeSync();
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreReviewLeaveRequest(requestId, decision, metadata);
+        }
+        return true;
+      } catch (err) {
+        console.warn('[SessionContext] Gagal memperbarui keputusan izin, rollback:', err);
+        setLeaveRequests((prev) =>
+          prev.map((item) => (item.id === requestId ? existing : item))
+        );
+        return false;
+      } finally {
+        setReviewingLeaveIds((prev) => prev.filter((id) => id !== requestId));
+      }
+    },
+    [leaveRequests, sessions, users, currentAssistantId, markRealtimeSync]
+  );
+
+  const getSessionLeaveRequests = useCallback(
+    (sessionId: string): LeaveRequest[] =>
+      leaveRequests.filter((l) => l.sessionId === sessionId),
+    [leaveRequests]
   );
 
   const getClassById = useCallback(
@@ -737,26 +852,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }));
   }, [sessions, getScheduleById, getAssistantById, getAttendanceCount]);
 
-  // Mengambil seluruh riwayat presensi beserta identitas praktikan pada suatu sesi
+  // Mengambil seluruh riwayat presensi beserta identitas praktikan pada suatu sesi (terurut waktu terbaru)
   const getSessionAttendanceRecords = useCallback(
     (sessionId: string): AttendanceRecord[] => {
       const records = attendance.filter((a) => a.sessionId === sessionId);
-      return records.map((rec) => {
-        const student = users.find((u) => u.id === rec.userId);
-        return {
-          id: rec.id,
-          sessionId: rec.sessionId,
-          userId: rec.userId,
-          userName: student?.name ?? 'Praktikan Tidak Dikenal',
-          userEmail: student?.email ?? '-',
-          recordedAt: rec.recordedAt,
-        };
-      });
+      return records
+        .map((rec) => {
+          const student = users.find((u) => u.id === rec.userId);
+          return {
+            id: rec.id,
+            sessionId: rec.sessionId,
+            userId: rec.userId,
+            userName: student?.name ?? 'Praktikan Tidak Dikenal',
+            userEmail: student?.email ?? '-',
+            recordedAt: rec.recordedAt,
+          };
+        })
+        .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
     },
     [attendance, users]
   );
 
-  // Mengambil daftar praktikan terdaftar
   const getPractitioners = useCallback((): User[] => {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
@@ -815,6 +931,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       updatingSessionIds,
       users,
       attendance,
+      leaveRequests,
+      reviewingLeaveIds,
+      lastRealtimeSyncAt,
+      realtimeEventCount,
       loading,
       error,
       isFirestoreConnected,
@@ -833,6 +953,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       isSessionUpdating,
       getSessionStatusLogs,
       recordAttendance,
+      reviewLeaveRequest,
+      getSessionLeaveRequests,
       getClassById,
       getScheduleById,
       getAssistantById,
@@ -856,6 +978,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       updatingSessionIds,
       users,
       attendance,
+      leaveRequests,
+      reviewingLeaveIds,
+      lastRealtimeSyncAt,
+      realtimeEventCount,
       loading,
       error,
       isFirestoreConnected,
@@ -874,6 +1000,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       isSessionUpdating,
       getSessionStatusLogs,
       recordAttendance,
+      reviewLeaveRequest,
+      getSessionLeaveRequests,
       getClassById,
       getScheduleById,
       getAssistantById,
