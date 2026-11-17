@@ -1,9 +1,11 @@
 /**
- * Service Analisis Sentimen AI On-Device (Pure JavaScript inference).
+ * Service Analisis Sentimen & Klasifikasi AI On-Device (Pure JavaScript inference).
  * Menggunakan model lokal dari folder `ai/` tanpa panggilan internet / network request.
  */
 
-export type SentimentLabel = 'positif' | 'netral' | 'negatif' | null;
+import type { LeaveCategory, SentimentLabel } from '@/types';
+
+export type { SentimentLabel };
 
 export interface AISentimentResult {
   label: SentimentLabel;
@@ -12,13 +14,92 @@ export interface AISentimentResult {
   scores?: number[] | null;
 }
 
+export interface AIPermissionAnalysisResult extends AISentimentResult {
+  category: LeaveCategory;
+  categoryLabel: string;
+}
+
 // Load model dan classifier lokal dari folder ai/
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createSentimentClassifier } = require('../../ai/sentiment');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const sentimentModel = require('../../ai/model-edom.json');
 
 const classifier = createSentimentClassifier(sentimentModel);
+
+/**
+ * SRS-12: Deteksi kategori izin berbasis ekstraksi kata kunci alasan ketidakhadiran
+ */
+export function detectLeaveCategory(text: string): LeaveCategory {
+  if (!text || typeof text !== 'string') return 'LAINNYA';
+  const lower = text.toLowerCase();
+
+  // 1. Kata kunci kondisi kesehatan / medis
+  if (
+    /sakit|demam|flu|batuk|pusing|rawat|opname|dokter|medis|klinik|rumah sakit|rs\b|tidak enak badan|lemas|cedera|kecelakaan|tifus|maag|diare|panas|muntah/i.test(
+      lower
+    )
+  ) {
+    return 'SAKIT';
+  }
+
+  // 2. Kata kunci penugasan institusi / lomba / organisasi resmi / dispensasi
+  if (
+    /dispensasi|lomba|kompetisi|delegasi|mewakili|turnamen|dinas|organisasi|kepanitiaan|kepengurusan|konferensi|seminar nasional/i.test(
+      lower
+    )
+  ) {
+    return 'DISPENSASI';
+  }
+
+  // 3. Kata kunci kegiatan akademik wajib / bentrok perkuliahan
+  if (
+    /kuliah|ujian|uts|uas|kuis|responsi|sidang|sempro|skripsi|kelas pengganti|bimbingan|akademik/i.test(
+      lower
+    )
+  ) {
+    return 'IZIN_AKADEMIK';
+  }
+
+  return 'LAINNYA';
+}
+
+/**
+ * Menghasilkan label teks ramah pengguna untuk kategori izin
+ */
+export function getCategoryDisplayName(category: LeaveCategory): string {
+  switch (category) {
+    case 'SAKIT':
+      return 'Sakit';
+    case 'IZIN_AKADEMIK':
+      return 'Izin Akademik';
+    case 'DISPENSASI':
+      return 'Dispensasi';
+    default:
+      return 'Keperluan Lain';
+  }
+}
+
+/**
+ * Analisis komprehensif alasan izin: menggabungkan deteksi kategori dan model sentimen lokal
+ */
+export function analyzePermissionReason(text: string): AIPermissionAnalysisResult {
+  const sentimentResult = analyzeSentiment(text);
+  const category = detectLeaveCategory(text);
+  const categoryLabel = getCategoryDisplayName(category);
+
+  const sentimentPart = sentimentResult.label
+    ? `Sentimen: ${sentimentResult.label}`
+    : 'Sentimen: netral';
+
+  const summary = `Kategori terdeteksi: ${categoryLabel} (${sentimentPart})`;
+
+  return {
+    ...sentimentResult,
+    category,
+    categoryLabel,
+    summary,
+  };
+}
 
 /**
  * Menganalisis sentimen dari teks komentar atau alasan izin.

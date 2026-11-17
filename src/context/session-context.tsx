@@ -33,6 +33,7 @@ import {
   firestoreBatchCloseSessions,
   firestoreRecordAttendance,
   firestoreReviewLeaveRequest,
+  firestoreSubmitLeaveRequest,
 } from '@/services/firestore-service';
 import { useAuth } from '@/context/auth-context';
 import type {
@@ -40,6 +41,7 @@ import type {
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
+  LeaveCategory,
   LeaveRequest,
   LeaveStatus,
   Permission,
@@ -152,7 +154,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
   const [realtimeEventCount, setRealtimeEventCount] = useState<number>(1);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(() => isFirebaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
@@ -162,13 +164,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // Sinkronisasi dengan user profile yang login jika ada
   useEffect(() => {
-    if (profile) {
+    if (!profile) return;
+    Promise.resolve().then(() => {
       if (profile.role === 'asisten') {
         setCurrentAssistantId(profile.id);
       } else if (profile.role === 'praktikan') {
         setCurrentStudentId(profile.id);
       }
-    }
+    });
   }, [profile]);
 
   useEffect(() => {
@@ -187,7 +190,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
 
     let isMounted = true;
-    setLoading(true);
     seedInitialFirestoreDataIfEmpty()
       .then(() => {
         if (isMounted) {
@@ -196,6 +198,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => {
         console.warn('[SessionContext] Gagal inisialisasi Firestore:', err);
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       })
       .finally(() => {
         if (isMounted) setLoading(false);
@@ -241,6 +246,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             b.submittedAt.localeCompare(a.submittedAt)
           );
           setLeaveRequests(sorted);
+
+          // Sinkronisasi real-time ke model permissions agar antarmuka riwayat praktikan ter-update otomatis
+          const mappedPermissions: Permission[] = sorted.map((req) => ({
+            id: req.id,
+            sessionId: req.sessionId,
+            userId: req.userId,
+            studentName: req.userName,
+            studentEmail: req.userEmail,
+            reason: req.reason,
+            sentiment: req.sentiment,
+            category: req.category as PermissionCategory,
+            aiAnalysis: req.aiAnalysis,
+            status: req.status,
+            createdAt: req.submittedAt,
+          }));
+          setPermissions(mappedPermissions);
+
           markRealtimeSync();
         }
       }
@@ -780,6 +802,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             : item
         )
       );
+      setPermissions((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: decision,
+              }
+            : item
+        )
+      );
       markRealtimeSync();
 
       try {
@@ -879,7 +911,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
-  // Mengajukan izin baru dengan analisis AI sentimen
+  // Mengajukan izin baru dengan analisis AI sentimen dan persistensi Firestore
   const addPermission = useCallback(
     (data: {
       sessionId: string;
@@ -889,8 +921,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       aiAnalysis?: string;
     }): Permission => {
       const student = users.find((u) => u.id === currentStudentId);
+      const now = new Date().toISOString();
+      const requestId = `leave-${data.sessionId}-${currentStudentId}-${Date.now()}`;
+
       const newPermission: Permission = {
-        id: `permission-${Date.now()}`,
+        id: requestId,
         sessionId: data.sessionId,
         userId: currentStudentId,
         studentName: student?.name ?? 'Praktikan',
@@ -900,12 +935,36 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         category: data.category,
         aiAnalysis: data.aiAnalysis,
         status: 'PENDING',
-        createdAt: new Date().toISOString(),
+        createdAt: now,
       };
+
+      const newLeaveRequest: LeaveRequest = {
+        id: requestId,
+        sessionId: data.sessionId,
+        userId: currentStudentId,
+        userName: student?.name ?? 'Praktikan',
+        userEmail: student?.email ?? 'praktikan@example.test',
+        category: (data.category as LeaveCategory) || 'LAINNYA',
+        reason: data.reason,
+        status: 'PENDING',
+        submittedAt: now,
+        sentiment: data.sentiment,
+        aiAnalysis: data.aiAnalysis,
+      };
+
       setPermissions((prev) => [newPermission, ...prev]);
+      setLeaveRequests((prev) => [newLeaveRequest, ...prev]);
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        firestoreSubmitLeaveRequest(newLeaveRequest).catch((err) => {
+          console.warn('[SessionContext] Gagal menyimpan izin ke Firestore:', err);
+        });
+      }
+
       return newPermission;
     },
-    [currentStudentId, users]
+    [currentStudentId, users, markRealtimeSync]
   );
 
   // SRS-11: Filter riwayat izin milik praktikan tertentu
@@ -921,6 +980,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     (permissionId: string, status: PermissionStatus) => {
       setPermissions((prev) =>
         prev.map((p) => (p.id === permissionId ? { ...p, status } : p))
+      );
+      setLeaveRequests((prev) =>
+        prev.map((l) => (l.id === permissionId ? { ...l, status } : l))
       );
     },
     []

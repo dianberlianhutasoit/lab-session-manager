@@ -151,6 +151,14 @@ export function LeaveRequestCard({
           &ldquo;{reason}&rdquo;
         </ThemedText>
 
+        {request.aiAnalysis || request.sentiment ? (
+          <View style={styles.aiBox}>
+            <ThemedText type="smallBold" style={styles.aiLabel}>
+              🤖 AI Assist: {request.aiAnalysis ?? `Sentimen: ${request.sentiment}`}
+            </ThemedText>
+          </View>
+        ) : null}
+
         <View style={styles.metaRow}>
           <ThemedText type="small" themeColor="textSecondary">
             🕒 Diajukan: {formatAttendanceTime(submittedAt)}
@@ -334,6 +342,20 @@ const styles = StyleSheet.create({
   reasonText: {
     lineHeight: 20,
     fontStyle: 'italic',
+  },
+  aiBox: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  aiLabel: {
+    color: '#0369A1',
+    fontSize: 11,
   },
   metaRow: {
     flexDirection: 'row',

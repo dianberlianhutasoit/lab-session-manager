@@ -100,6 +100,8 @@ export type PermissionStatus = "PENDING" | "APPROVED" | "REJECTED";
 export type PermissionCategory =
   | "SAKIT"
   | "AKADEMIK"
+  | "IZIN_AKADEMIK"
+  | "DISPENSASI"
   | "DARURAT"
   | "LAINNYA"
   | "Unclassified";
@@ -136,6 +138,8 @@ export interface LeaveRequest {
   reviewedByName?: string;
   reviewedAt?: string;
   reviewerNote?: string;
+  sentiment?: SentimentLabel;
+  aiAnalysis?: string;
 }
 
 /**

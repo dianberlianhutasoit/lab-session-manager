@@ -410,6 +410,19 @@ export async function firestoreRecordAttendance(record: Attendance): Promise<voi
 }
 
 /**
+ * SRS-11: Simpan pengajuan izin baru praktikan ke Firestore (collection: leave_requests)
+ */
+export async function firestoreSubmitLeaveRequest(
+  request: LeaveRequest
+): Promise<void> {
+  if (!db) return;
+  await setDoc(
+    doc(db, COLLECTIONS.LEAVE_REQUESTS, request.id),
+    stripUndefined(request)
+  );
+}
+
+/**
  * SRS-10: Simpan keputusan peninjauan izin praktikan (APPROVED / REJECTED) di Firestore
  */
 export async function firestoreReviewLeaveRequest(

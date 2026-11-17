@@ -1,6 +1,6 @@
 import { users as dummyUsers } from '@/data/dummy';
 import type { Role, User } from '@/types';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'authenticated' | 'needsProfile' | 'profileError';
 
@@ -21,30 +21,29 @@ function isRole(value: unknown): value is Role {
   return value === 'praktikan' || value === 'asisten';
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus>('loading');
-  const [profile, setProfile] = useState<User | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Restore session from localStorage on web mount
-  useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const saved = window.localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved) as User;
-          if (parsed && parsed.id && isRole(parsed.role)) {
-            setProfile(parsed);
-            setStatus('authenticated');
-            return;
-          }
+function getInitialWebUser(): User | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as User;
+        if (parsed && parsed.id && isRole(parsed.role)) {
+          return parsed;
         }
       }
-    } catch (e) {
-      console.warn('[Auth Web] Gagal memulihkan sesi dari localStorage:', e);
     }
-    setStatus('signedOut');
-  }, []);
+  } catch {
+    // Ignore storage parse failure on initial load
+  }
+  return null;
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [profile, setProfile] = useState<User | null>(getInitialWebUser);
+  const [status, setStatus] = useState<AuthStatus>(() =>
+    profile ? 'authenticated' : 'signedOut'
+  );
+  const [error, setError] = useState<string | null>(null);
 
   const saveUser = useCallback((user: User | null) => {
     setProfile(user);

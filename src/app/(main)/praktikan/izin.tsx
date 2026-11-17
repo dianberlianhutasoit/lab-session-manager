@@ -16,7 +16,7 @@ import { FormPengajuanIzin } from '@/components/izin/form-pengajuan-izin';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useSessionContext } from '@/context/session-context';
 import { useTheme } from '@/hooks/use-theme';
-import { analyzeSentiment } from '@/services/ai-sentiment';
+import { analyzePermissionReason } from '@/services/ai-sentiment';
 
 export default function IzinPraktikanScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -29,13 +29,14 @@ export default function IzinPraktikanScreen() {
   const handleSubmitPermission = async (data: { sessionId: string; reason: string }) => {
     setIsSubmitting(true);
     try {
-      // Integrasi AI On-Device: Model analisis sentimen langsung di perangkat
-      const aiResult = analyzeSentiment(data.reason);
+      // Integrasi AI On-Device: Model analisis sentimen lokal + deteksi kategori izin
+      const aiResult = analyzePermissionReason(data.reason);
 
       addPermission({
         sessionId: data.sessionId,
         reason: data.reason,
         sentiment: aiResult.label,
+        category: aiResult.category,
         aiAnalysis: aiResult.summary,
       });
 
