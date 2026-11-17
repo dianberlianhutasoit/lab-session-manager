@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
-  Pressable,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,6 +32,7 @@ import {
   useSessionContext,
   SessionWithDetails,
 } from '@/context/session-context';
+import { useAuth } from '@/context/auth-context';
 import type {
   LabClass,
   LabClassFormInput,
@@ -62,6 +63,8 @@ export default function HomeScreen() {
     getClassesWithDetails,
     getSessionsWithDetails,
   } = useSessionContext();
+  const { profile, logout } = useAuth();
+  const { loading, error } = useSessionContext();
 
   const [activeSubTab, setActiveSubTab] = useState<ManagementSubTab>('SESSIONS');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
@@ -270,8 +273,9 @@ export default function HomeScreen() {
             Manajemen Praktikum & Status Sesi
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-07 & SRS-08: Kelola kelas & jadwal praktikum, kontrol status pembukaan/penutupan sesi (OPEN/CLOSED), serta pantau audit waktu sesi.
+            Halo, {profile?.name ?? 'Asisten'}. Kelola kelas & jadwal praktikum, kontrol status pembukaan/penutupan sesi (OPEN/CLOSED), serta pantau kehadiran praktikan.
           </ThemedText>
+          <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
         </View>
 
         {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas (SRS-07) */}
@@ -336,7 +340,6 @@ export default function HomeScreen() {
               <ThemedText type="subtitle" style={styles.listTitle}>
                 Daftar Jadwal Sesi ({filteredSessions.length})
               </ThemedText>
-
               <Pressable
                 onPress={() => handleOpenCreateSession()}
                 style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
@@ -346,14 +349,20 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            {filteredSessions.length === 0 ? (
+            {loading ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Memuat sesi…
+                </ThemedText>
+              </ThemedView>
+            ) : filteredSessions.length === 0 ? (
               <ThemedView type="backgroundElement" style={styles.emptyContainer}>
                 <ThemedText style={styles.emptyIcon}>📂</ThemedText>
                 <ThemedText type="subtitle" style={styles.emptyTitle}>
                   Tidak ada sesi praktikum
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.
+                  {error ?? 'Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.'}
                 </ThemedText>
               </ThemedView>
             ) : (

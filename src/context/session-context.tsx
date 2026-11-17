@@ -7,6 +7,7 @@ import React, {
   useRef,
   useEffect,
 } from 'react';
+
 import {
   users as initialUsers,
   classes as initialClasses,
@@ -15,6 +16,7 @@ import {
   statusLogs as initialStatusLogs,
   attendance as initialAttendance,
   leaveRequests as initialLeaveRequests,
+  permissions as initialPermissions,
 } from '@/data/dummy';
 import { isFirebaseConfigured } from '@/config/firebase';
 import {
@@ -32,6 +34,7 @@ import {
   firestoreRecordAttendance,
   firestoreReviewLeaveRequest,
 } from '@/services/firestore-service';
+import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
   AttendanceRecord,
@@ -39,6 +42,9 @@ import type {
   LabClassFormInput,
   LeaveRequest,
   LeaveStatus,
+  Permission,
+  PermissionCategory,
+  PermissionStatus,
   Schedule,
   Session,
   SessionScheduleFormInput,
@@ -67,6 +73,8 @@ interface SessionContextValue {
   reviewingLeaveIds: string[];
   lastRealtimeSyncAt: string;
   realtimeEventCount: number;
+  loading: boolean;
+  error: string | null;
   isFirestoreConnected: boolean;
   currentAssistantId: string;
   setCurrentAssistantId: (id: string) => void;
@@ -92,7 +100,7 @@ interface SessionContextValue {
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
-  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => boolean;
+  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
     decision: Exclude<LeaveStatus, 'PENDING'>,
@@ -109,11 +117,25 @@ interface SessionContextValue {
   getSessionsWithDetails: () => SessionWithDetails[];
   getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
   getPractitioners: () => User[];
+  // SRS-11 s/d SRS-13: Pengajuan Izin & Integrasi AI
+  permissions: Permission[];
+  currentStudentId: string;
+  setCurrentStudentId: (id: string) => void;
+  addPermission: (data: {
+    sessionId: string;
+    reason: string;
+    category?: PermissionCategory;
+    aiAnalysis?: string;
+  }) => Permission;
+  getPermissionsByUser: (userId: string) => Permission[];
+  updatePermissionStatus: (permissionId: string, status: PermissionStatus) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth();
+
   const [classes, setClasses] = useState<LabClass[]>(initialClasses);
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [schedules, setSchedules] = useState<Schedule[]>(initialSchedules);
@@ -128,8 +150,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
   const [realtimeEventCount, setRealtimeEventCount] = useState<number>(1);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
   const [currentAssistantId, setCurrentAssistantId] = useState<string>('user-asisten-001');
+  const [permissions, setPermissions] = useState<Permission[]>(initialPermissions);
+  const [currentStudentId, setCurrentStudentId] = useState<string>('user-praktikan-001');
+
+  // Sinkronisasi dengan user profile yang login jika ada
+  useEffect(() => {
+    if (profile) {
+      if (profile.role === 'asisten') {
+        setCurrentAssistantId(profile.id);
+      } else if (profile.role === 'praktikan') {
+        setCurrentStudentId(profile.id);
+      }
+    }
+  }, [profile]);
 
   useEffect(() => {
     attendanceRef.current = attendance;
@@ -147,11 +185,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
 
     let isMounted = true;
-    seedInitialFirestoreDataIfEmpty().then(() => {
-      if (isMounted) {
-        setIsFirestoreConnected(true);
-      }
-    });
+    setLoading(true);
+    seedInitialFirestoreDataIfEmpty()
+      .then(() => {
+        if (isMounted) {
+          setIsFirestoreConnected(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('[SessionContext] Gagal inisialisasi Firestore:', err);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
 
     const unsubClasses = subscribeToCollection<LabClass>(COLLECTIONS.CLASSES, (items) => {
       if (items.length > 0) setClasses(items);
@@ -657,7 +703,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
-    (sessionId: string, userId: string, recordedAt: string): boolean => {
+    async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
+      const targetSession = sessions.find((s) => s.id === sessionId);
+      if (targetSession && targetSession.status !== 'OPEN') {
+        throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
+      }
+
       const alreadyRecorded = attendanceRef.current.some(
         (record) => record.sessionId === sessionId && record.userId === userId
       );
@@ -676,12 +727,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       markRealtimeSync();
 
       if (isFirebaseConfigured) {
-        firestoreRecordAttendance(newRecord);
+        await firestoreRecordAttendance(newRecord);
       }
 
       return true;
     },
-    [markRealtimeSync]
+    [sessions, markRealtimeSync]
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -826,6 +877,51 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
+  // SRS-11: Mengajukan izin baru
+  const addPermission = useCallback(
+    (data: {
+      sessionId: string;
+      reason: string;
+      category?: PermissionCategory;
+      aiAnalysis?: string;
+    }): Permission => {
+      const student = users.find((u) => u.id === currentStudentId);
+      const newPermission: Permission = {
+        id: `permission-${Date.now()}`,
+        sessionId: data.sessionId,
+        userId: currentStudentId,
+        studentName: student?.name ?? 'Praktikan',
+        studentEmail: student?.email ?? 'praktikan@example.test',
+        reason: data.reason,
+        category: data.category ?? 'Unclassified',
+        aiAnalysis: data.aiAnalysis,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      };
+      setPermissions((prev) => [newPermission, ...prev]);
+      return newPermission;
+    },
+    [currentStudentId, users]
+  );
+
+  // SRS-11: Filter riwayat izin milik praktikan tertentu
+  const getPermissionsByUser = useCallback(
+    (userId: string): Permission[] => {
+      return permissions.filter((p) => p.userId === userId);
+    },
+    [permissions]
+  );
+
+  // SRS-10: Memperbarui status izin (APPROVED/REJECTED) oleh asisten
+  const updatePermissionStatus = useCallback(
+    (permissionId: string, status: PermissionStatus) => {
+      setPermissions((prev) =>
+        prev.map((p) => (p.id === permissionId ? { ...p, status } : p))
+      );
+    },
+    []
+  );
+
   const value = useMemo(
     () => ({
       classes,
@@ -839,8 +935,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       reviewingLeaveIds,
       lastRealtimeSyncAt,
       realtimeEventCount,
+      loading,
+      error,
       isFirestoreConnected,
-      currentAssistantId,
+      currentAssistantId: profile?.role === 'asisten' ? profile.id : currentAssistantId,
       setCurrentAssistantId,
       createClass,
       updateClass,
@@ -865,6 +963,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionsWithDetails,
       getSessionAttendanceRecords,
       getPractitioners,
+      permissions,
+      currentStudentId: profile?.role === 'praktikan' ? profile.id : currentStudentId,
+      setCurrentStudentId,
+      addPermission,
+      getPermissionsByUser,
+      updatePermissionStatus,
     }),
     [
       classes,
@@ -878,7 +982,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       reviewingLeaveIds,
       lastRealtimeSyncAt,
       realtimeEventCount,
+      loading,
+      error,
       isFirestoreConnected,
+      profile,
       currentAssistantId,
       createClass,
       updateClass,
@@ -903,16 +1010,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionsWithDetails,
       getSessionAttendanceRecords,
       getPractitioners,
+      permissions,
+      currentStudentId,
+      addPermission,
+      getPermissionsByUser,
+      updatePermissionStatus,
     ]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-export function useSessionContext(): SessionContextValue {
+export function useSessionContext() {
   const context = useContext(SessionContext);
-  if (!context) {
-    throw new Error('useSessionContext must be used within a SessionProvider');
-  }
+  if (!context) throw new Error('useSessionContext must be used within SessionProvider');
   return context;
 }

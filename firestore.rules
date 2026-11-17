@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // HELPER FUNCTIONS (Fungsi Keamanan)
+    // ==========================================
+
+    // Memeriksa apakah pengguna sudah login via Firebase Auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Memeriksa apakah UID pengguna sesuai dengan dokumen pemilik
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Mengambil data pengguna dari koleksi users
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Memeriksa apakah pengguna memiliki role 'asisten'
+    function isAssistant() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'asisten' ||
+        getUserData().role == 'asisten'
+      );
+    }
+
+    // Memeriksa apakah pengguna memiliki role 'praktikan'
+    function isPractitioner() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'praktikan' ||
+        getUserData().role == 'praktikan'
+      );
+    }
+
+    // ==========================================
+    // 1. KOLEKSI USERS (SRS-02)
+    // ==========================================
+    match /users/{userId} {
+      // Semua pengguna login bisa membaca profil dasar sesama pengguna/asisten
+      allow read: if isAuthenticated();
+      // Pengguna hanya bisa mendaftarkan atau memperbarui profil miliknya sendiri
+      allow create, update: if isAuthenticated() && isOwner(userId);
+      allow delete: if false; // Profil tidak boleh sembarangan dihapus
+    }
+
+    // ==========================================
+    // 2. KOLEKSI CLASSES (Kelas Praktikum - SRS-07)
+    // ==========================================
+    match /classes/{classId} {
+      // Praktikan dan asisten dapat melihat daftar kelas
+      allow read: if isAuthenticated();
+      // Hanya role Asisten yang berhak membuat, mengedit, atau menghapus kelas
+      allow write: if isAssistant();
+    }
+
+    // ==========================================
+    // 3. KOLEKSI SESSIONS (Sesi Praktikum - SRS-07 & SRS-08)
+    // ==========================================
+    match /sessions/{sessionId} {
+      // Praktikan dan asisten dapat melihat jadwal & status sesi
+      allow read: if isAuthenticated();
+      // Hanya role Asisten yang berhak membuka/menutup sesi (OPEN/CLOSED) atau mengubah jadwal
+      allow write: if isAssistant();
+    }
+
+    // ==========================================
+    // 4. KOLEKSI ATTENDANCE (Presensi Praktikan - SRS-05 & SRS-06)
+    // ==========================================
+    match /attendance/{attendanceId} {
+      // Praktikan bisa melihat riwayat presensi miliknya; Asisten bisa melihat rekap semua presensi
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAssistant()
+      );
+
+      // Praktikan hanya bisa mencatat kehadiran atas nama dirinya sendiri
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+
+      // Hanya Asisten yang diizinkan mengoreksi atau menghapus data kehadiran
+      allow update, delete: if isAssistant();
+    }
+
+    // ==========================================
+    // 5. KOLEKSI PERMISSIONS (Pengajuan Izin - SRS-11 s/d SRS-14)
+    // ==========================================
+    match /permissions/{permissionId} {
+      // Praktikan hanya bisa membaca izin miliknya; Asisten bisa membaca seluruh pengajuan izin
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAssistant()
+      );
+
+      // Praktikan membuat pengajuan izin:
+      // - Wajib milik dirinya sendiri (userId == request.auth.uid)
+      // - Status awal WAJIB 'PENDING'
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'PENDING';
+
+      // Keputusan Izin (SRS-10):
+      // Hanya Asisten yang berhak mengubah status pengajuan izin (APPROVED / REJECTED)
+      allow update: if isAssistant();
+
+      // Izin hanya bisa dihapus oleh asisten jika diperlukan
+      allow delete: if isAssistant();
+    }
+  }
+}
+

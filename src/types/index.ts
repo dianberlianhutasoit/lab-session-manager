@@ -92,6 +92,29 @@ export interface AttendanceRecord {
   recordedAt: string;
 }
 
+// --- SRS-11 s/d SRS-13: Modul Pengajuan Izin & Integrasi AI ---
+export type PermissionStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type PermissionCategory =
+  | "SAKIT"
+  | "AKADEMIK"
+  | "DARURAT"
+  | "LAINNYA"
+  | "Unclassified";
+
+export interface Permission {
+  id: string;
+  sessionId: string;
+  userId: string;
+  studentName: string;
+  studentEmail: string;
+  reason: string;
+  category: PermissionCategory;
+  aiAnalysis?: string;
+  status: PermissionStatus;
+  createdAt: string;
+}
+
 /**
  * SRS-10: Representasi Pengajuan Izin Praktikan (collection: leave_requests)
  */

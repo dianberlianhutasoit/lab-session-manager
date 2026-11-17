@@ -1,10 +1,12 @@
 import { Stack } from "expo-router";
 import { FlatList, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { useSessionContext } from "../../context/session-context";
+import { useSessionContext } from "@/context/session-context";
+import { useAuth } from "@/context/auth-context";
 
 export default function PraktikanRiwayatScreen() {
-  const { attendance, sessions, schedules, users } = useSessionContext();
-  const practitioner = users.find((user) => user.role === "praktikan");
+  const { attendance, sessions, schedules } = useSessionContext();
+  const { profile } = useAuth();
+  const practitioner = profile;
   const history = attendance
     .filter((record) => record.userId === practitioner?.id)
     .flatMap((record) => {
