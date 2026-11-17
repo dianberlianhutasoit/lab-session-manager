@@ -16,7 +16,7 @@ import { FormPengajuanIzin } from '@/components/izin/form-pengajuan-izin';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useSessionContext } from '@/context/session-context';
 import { useTheme } from '@/hooks/use-theme';
-import { classifyPermissionReason } from '@/services/ai-classifier';
+import { analyzeSentiment } from '@/services/ai-sentiment';
 
 export default function IzinPraktikanScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -29,13 +29,13 @@ export default function IzinPraktikanScreen() {
   const handleSubmitPermission = async (data: { sessionId: string; reason: string }) => {
     setIsSubmitting(true);
     try {
-      // SRS-12 & SRS-13: Klasifikasi AI via fetch REST API dengan timeout & fallback
-      const aiResult = await classifyPermissionReason(data.reason);
+      // Integrasi AI On-Device: Model analisis sentimen langsung di perangkat
+      const aiResult = analyzeSentiment(data.reason);
 
       addPermission({
         sessionId: data.sessionId,
         reason: data.reason,
-        category: aiResult.category,
+        sentiment: aiResult.label,
         aiAnalysis: aiResult.summary,
       });
 

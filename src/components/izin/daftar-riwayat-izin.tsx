@@ -5,7 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useSessionContext } from '@/context/session-context';
-import type { Permission, PermissionCategory, PermissionStatus } from '@/types';
+import type { Permission, PermissionCategory, PermissionStatus, SentimentLabel } from '@/types';
 
 interface DaftarRiwayatIzinProps {
   permissionsList?: Permission[];
@@ -62,6 +62,31 @@ export function StatusBadge({ status }: { status: PermissionStatus }) {
     <View style={[styles.badgeBase, badgeStyle]}>
       <ThemedText type="smallBold" style={[styles.badgeTextBase, textStyle]}>
         {label}
+      </ThemedText>
+    </View>
+  );
+}
+
+export function SentimentBadge({ sentiment }: { sentiment?: SentimentLabel }) {
+  const getSentimentTheme = () => {
+    switch (sentiment) {
+      case 'positif':
+        return { bg: '#DCFCE7', border: '#86EFAC', text: '#15803D', label: '😊 Positif' };
+      case 'netral':
+        return { bg: '#E0F2FE', border: '#BAE6FD', text: '#0369A1', label: '😐 Netral' };
+      case 'negatif':
+        return { bg: '#FEE2E2', border: '#FECACA', text: '#B91C1C', label: '🙁 Negatif' };
+      default:
+        return { bg: '#F1F5F9', border: '#CBD5E1', text: '#64748B', label: '⚪ Belum Teranalisis' };
+    }
+  };
+
+  const theme = getSentimentTheme();
+
+  return (
+    <View style={[styles.catBadge, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+      <ThemedText type="smallBold" style={[styles.catText, { color: theme.text }]}>
+        {theme.label}
       </ThemedText>
     </View>
   );
@@ -157,13 +182,19 @@ export function DaftarRiwayatIzin({ permissionsList }: DaftarRiwayatIzinProps) {
               </ThemedText>
             </View>
 
-            {/* AI Classification Info (SRS-12 & SRS-13) */}
+            {/* AI Sentiment / Classification Info */}
             <View style={styles.aiBox}>
               <View style={styles.aiHeader}>
                 <ThemedText type="smallBold" style={styles.aiLabel}>
-                  🤖 Prediksi Kategori AI:
+                  🤖 Analisis Sentimen AI:
                 </ThemedText>
-                <CategoryBadge category={item.category} />
+                {item.sentiment ? (
+                  <SentimentBadge sentiment={item.sentiment} />
+                ) : item.category ? (
+                  <CategoryBadge category={item.category} />
+                ) : (
+                  <SentimentBadge />
+                )}
               </View>
               {item.aiAnalysis ? (
                 <ThemedText type="small" style={styles.aiAnalysisText}>
