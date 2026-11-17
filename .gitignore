@@ -44,6 +44,5 @@ example
 /ios
 /android
 
-# personal notes
-programmer3.md
-
+# Firebase configuration
+google-services.json
