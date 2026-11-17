@@ -22,7 +22,6 @@
       "package": "com.dianberlianhutasoit.labsessionmanager"
     },
     "web": {
-      "output": "server",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
