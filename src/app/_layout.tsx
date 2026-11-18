@@ -10,7 +10,7 @@ import { SessionProvider } from "@/context/session-context";
 
 SplashScreen.preventAutoHideAsync();
 
-export default function TabLayout() {
+export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
     <ErrorBoundary>

@@ -1,4 +1,13 @@
-import type { Attendance, LabClass, Permission, Schedule, Session, User } from "../types";
+import type {
+  Attendance,
+  LabClass,
+  LeaveRequest,
+  Permission,
+  Schedule,
+  Session,
+  SessionStatusLog,
+  User,
+} from "../types";
 
 export const users: User[] = [
   {
@@ -17,6 +26,12 @@ export const users: User[] = [
     id: "user-praktikan-003",
     name: "Sinta Maharani",
     email: "sinta.maharani@example.test",
+    role: "praktikan",
+  },
+  {
+    id: "user-praktikan-004",
+    name: "Bagas Prakoso",
+    email: "bagas.prakoso@example.test",
     role: "praktikan",
   },
   {
@@ -115,6 +130,8 @@ export const sessions: Session[] = [
     scheduleId: "schedule-001",
     assistantId: "user-asisten-001",
     status: "OPEN",
+    openedAt: "2026-10-26T09:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
   },
   {
     id: "session-002",
@@ -122,6 +139,9 @@ export const sessions: Session[] = [
     scheduleId: "schedule-002",
     assistantId: "user-asisten-002",
     status: "CLOSED",
+    openedAt: "2026-10-27T13:00:00+07:00",
+    closedAt: "2026-10-27T15:00:00+07:00",
+    lastUpdatedBy: "user-asisten-002",
   },
   {
     id: "session-003",
@@ -129,6 +149,42 @@ export const sessions: Session[] = [
     scheduleId: "schedule-003",
     assistantId: "user-asisten-001",
     status: "CLOSED",
+    openedAt: "2026-10-28T10:00:00+07:00",
+    closedAt: "2026-10-28T12:00:00+07:00",
+    lastUpdatedBy: "user-asisten-001",
+  },
+];
+
+export const statusLogs: SessionStatusLog[] = [
+  {
+    id: "log-001",
+    sessionId: "session-001",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-001",
+    changedByName: "Dimas Saputra",
+    isSubstitute: false,
+    changedAt: "2026-10-26T09:00:00+07:00",
+  },
+  {
+    id: "log-002",
+    sessionId: "session-002",
+    previousStatus: "CLOSED",
+    newStatus: "OPEN",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T13:00:00+07:00",
+  },
+  {
+    id: "log-003",
+    sessionId: "session-002",
+    previousStatus: "OPEN",
+    newStatus: "CLOSED",
+    changedBy: "user-asisten-002",
+    changedByName: "Ayu Lestari",
+    isSubstitute: false,
+    changedAt: "2026-10-27T15:00:00+07:00",
   },
 ];
 
@@ -150,6 +206,79 @@ export const attendance: Attendance[] = [
     sessionId: "session-003",
     userId: "user-praktikan-003",
     recordedAt: "2026-10-28T10:01:00+07:00",
+  },
+];
+
+/**
+ * SRS-10: Data awal pengajuan izin praktikan untuk pengujian Panel Peninjauan Izin
+ */
+export const leaveRequests: LeaveRequest[] = [
+  {
+    id: "leave-001",
+    sessionId: "session-001",
+    userId: "user-praktikan-002",
+    userName: "Rafi Pratama",
+    userEmail: "rafi.pratama@example.test",
+    category: "SAKIT",
+    reason: "Demam tinggi dan harus istirahat berdasarkan surat keterangan dokter klinik kampus.",
+    attachmentName: "surat_dokter_rafi_pratama.pdf",
+    status: "PENDING",
+    submittedAt: "2026-10-26T08:15:00+07:00",
+  },
+  {
+    id: "leave-002",
+    sessionId: "session-001",
+    userId: "user-praktikan-003",
+    userName: "Sinta Maharani",
+    userEmail: "sinta.maharani@example.test",
+    category: "DISPENSASI",
+    reason: "Mewakili universitas pada lomba kompetisi pemrograman tingkat nasional (Gemastik).",
+    attachmentName: "surat_tugas_dekanat_sinta.pdf",
+    status: "PENDING",
+    submittedAt: "2026-10-26T08:30:00+07:00",
+  },
+  {
+    id: "leave-003",
+    sessionId: "session-002",
+    userId: "user-praktikan-003",
+    userName: "Sinta Maharani",
+    userEmail: "sinta.maharani@example.test",
+    category: "DISPENSASI",
+    reason: "Mengikuti karantina final lomba Gemastik mewakili fakultas.",
+    attachmentName: "surat_dispensasi_fakultas.pdf",
+    status: "APPROVED",
+    submittedAt: "2026-10-27T10:00:00+07:00",
+    reviewedBy: "user-asisten-002",
+    reviewedByName: "Ayu Lestari",
+    reviewedAt: "2026-10-27T11:20:00+07:00",
+    reviewerNote: "Disetujui sesuai surat dispensasi resmi dekanat. Silakan susul modul mandiri.",
+  },
+  {
+    id: "leave-004",
+    sessionId: "session-002",
+    userId: "user-praktikan-004",
+    userName: "Bagas Prakoso",
+    userEmail: "bagas.prakoso@example.test",
+    category: "LAINNYA",
+    reason: "Bangun kesiangan dan ban motor bocor di perjalanan.",
+    status: "REJECTED",
+    submittedAt: "2026-10-27T13:25:00+07:00",
+    reviewedBy: "user-asisten-002",
+    reviewedByName: "Ayu Lestari",
+    reviewedAt: "2026-10-27T13:40:00+07:00",
+    reviewerNote: "Alasan tidak termasuk kategori izin resmi laboratorium dan tanpa bukti pendukung.",
+  },
+  {
+    id: "leave-005",
+    sessionId: "session-003",
+    userId: "user-praktikan-001",
+    userName: "Nadia Putri",
+    userEmail: "nadia.putri@example.test",
+    category: "IZIN_AKADEMIK",
+    reason: "Jadwal bentrok dengan seminar proposal skripsi di ruang sidang jurusan.",
+    attachmentName: "undangan_seminar_nadia.pdf",
+    status: "PENDING",
+    submittedAt: "2026-10-28T08:45:00+07:00",
   },
 ];
 
@@ -179,4 +308,3 @@ export const permissions: Permission[] = [
     createdAt: "2026-10-26T14:15:00+07:00",
   },
 ];
-
