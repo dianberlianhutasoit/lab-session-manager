@@ -7,12 +7,15 @@ import React, {
   useRef,
   useEffect,
 } from 'react';
+
 import {
   users as initialUsers,
   classes as initialClasses,
   schedules as initialSchedules,
   sessions as initialSessions,
+  statusLogs as initialStatusLogs,
   attendance as initialAttendance,
+  leaveRequests as initialLeaveRequests,
   permissions as initialPermissions,
 } from '@/data/dummy';
 import { isFirebaseConfigured } from '@/config/firebase';
@@ -27,20 +30,29 @@ import {
   firestoreUpdateSessionAndSchedule,
   firestoreDeleteSessionAndSchedule,
   firestoreUpdateSessionStatus,
+  firestoreBatchCloseSessions,
   firestoreRecordAttendance,
+  firestoreReviewLeaveRequest,
+  firestoreSubmitLeaveRequest,
 } from '@/services/firestore-service';
+import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
+  LeaveCategory,
+  LeaveRequest,
+  LeaveStatus,
   Permission,
   PermissionCategory,
   PermissionStatus,
+  SentimentLabel,
   Schedule,
   Session,
   SessionScheduleFormInput,
   SessionStatus,
+  SessionStatusLog,
   User,
 } from '@/types';
 import type { LabClassWithDetails } from '@/components/asisten/class-card';
@@ -48,6 +60,7 @@ import type { LabClassWithDetails } from '@/components/asisten/class-card';
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
   assistant?: User;
+  lastUpdatedByUser?: User;
   attendanceCount: number;
 }
 
@@ -55,8 +68,16 @@ interface SessionContextValue {
   classes: LabClass[];
   sessions: Session[];
   schedules: Schedule[];
+  statusLogs: SessionStatusLog[];
+  updatingSessionIds: string[];
   users: User[];
   attendance: Attendance[];
+  leaveRequests: LeaveRequest[];
+  reviewingLeaveIds: string[];
+  lastRealtimeSyncAt: string;
+  realtimeEventCount: number;
+  loading: boolean;
+  error: string | null;
   isFirestoreConnected: boolean;
   currentAssistantId: string;
   setCurrentAssistantId: (id: string) => void;
@@ -71,11 +92,25 @@ interface SessionContextValue {
     input: SessionScheduleFormInput
   ) => Promise<boolean>;
   deleteSessionSchedule: (sessionId: string) => Promise<boolean>;
-  // SRS-06 / SRS-08: Membuka dan menutup sesi praktikum
-  openSession: (sessionId: string) => void;
-  closeSession: (sessionId: string) => void;
-  toggleSessionStatus: (sessionId: string) => void;
-  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => boolean;
+  // SRS-08: Kontrol Status Pembukaan/Penutupan Sesi (OPEN / CLOSED)
+  openSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  closeSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  toggleSessionStatus: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  closeAllOpenSessions: (
+    assistantIdFilter?: string,
+    actorAssistantId?: string
+  ) => Promise<number>;
+  isSessionUpdating: (sessionId: string) => boolean;
+  getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
+  // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
+  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
+  reviewLeaveRequest: (
+    requestId: string,
+    decision: Exclude<LeaveStatus, 'PENDING'>,
+    reviewerNote?: string,
+    actorAssistantId?: string
+  ) => Promise<boolean>;
+  getSessionLeaveRequests: (sessionId: string) => LeaveRequest[];
   // Helper queries
   getClassById: (classId: string) => LabClass | undefined;
   getScheduleById: (scheduleId: string) => Schedule | undefined;
@@ -83,7 +118,6 @@ interface SessionContextValue {
   getAttendanceCount: (sessionId: string) => number;
   getClassesWithDetails: () => LabClassWithDetails[];
   getSessionsWithDetails: () => SessionWithDetails[];
-  // Rekap Presensi Praktikan
   getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
   getPractitioners: () => User[];
   // SRS-11 s/d SRS-13: Pengajuan Izin & Integrasi AI
@@ -93,6 +127,7 @@ interface SessionContextValue {
   addPermission: (data: {
     sessionId: string;
     reason: string;
+    sentiment?: SentimentLabel;
     category?: PermissionCategory;
     aiAnalysis?: string;
   }) => Permission;
@@ -103,33 +138,73 @@ interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth();
+
   const [classes, setClasses] = useState<LabClass[]>(initialClasses);
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [schedules, setSchedules] = useState<Schedule[]>(initialSchedules);
+  const [statusLogs, setStatusLogs] = useState<SessionStatusLog[]>(initialStatusLogs);
+  const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
+  const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
+  const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(
+    () => new Date().toISOString()
+  );
+  const [realtimeEventCount, setRealtimeEventCount] = useState<number>(1);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(() => isFirebaseConfigured);
+  const [error, setError] = useState<string | null>(null);
+
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
   const [currentAssistantId, setCurrentAssistantId] = useState<string>('user-asisten-001');
   const [permissions, setPermissions] = useState<Permission[]>(initialPermissions);
   const [currentStudentId, setCurrentStudentId] = useState<string>('user-praktikan-001');
 
+  // Sinkronisasi dengan user profile yang login jika ada
+  useEffect(() => {
+    if (!profile) return;
+    Promise.resolve().then(() => {
+      if (profile.role === 'asisten') {
+        setCurrentAssistantId(profile.id);
+      } else if (profile.role === 'praktikan') {
+        setCurrentStudentId(profile.id);
+      }
+    });
+  }, [profile]);
+
   useEffect(() => {
     attendanceRef.current = attendance;
   }, [attendance]);
 
-  // Sinkronisasi real-time dengan Firebase Firestore jika dikonfigurasi
+  const markRealtimeSync = useCallback(() => {
+    setLastRealtimeSyncAt(new Date().toISOString());
+    setRealtimeEventCount((prev) => prev + 1);
+  }, []);
+
+  // SRS-09: Sinkronisasi real-time berbasis onSnapshot dengan Firebase Firestore
   useEffect(() => {
     if (!isFirebaseConfigured) {
       return;
     }
 
     let isMounted = true;
-    seedInitialFirestoreDataIfEmpty().then(() => {
-      if (isMounted) {
-        setIsFirestoreConnected(true);
-      }
-    });
+    seedInitialFirestoreDataIfEmpty()
+      .then(() => {
+        if (isMounted) {
+          setIsFirestoreConnected(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('[SessionContext] Gagal inisialisasi Firestore:', err);
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
 
     const unsubClasses = subscribeToCollection<LabClass>(COLLECTIONS.CLASSES, (items) => {
       if (items.length > 0) setClasses(items);
@@ -140,12 +215,58 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     });
 
     const unsubSessions = subscribeToCollection<Session>(COLLECTIONS.SESSIONS, (items) => {
-      if (items.length > 0) setSessions(items);
+      if (items.length > 0) {
+        setSessions(items);
+        markRealtimeSync();
+      }
     });
+
+    const unsubLogs = subscribeToCollection<SessionStatusLog>(
+      COLLECTIONS.STATUS_LOGS,
+      (items) => {
+        if (items.length > 0) {
+          const sorted = [...items].sort((a, b) =>
+            b.changedAt.localeCompare(a.changedAt)
+          );
+          setStatusLogs(sorted);
+        }
+      }
+    );
 
     const unsubAttendance = subscribeToCollection<Attendance>(COLLECTIONS.ATTENDANCE, (items) => {
       setAttendance(items);
+      markRealtimeSync();
     });
+
+    const unsubLeaves = subscribeToCollection<LeaveRequest>(
+      COLLECTIONS.LEAVE_REQUESTS,
+      (items) => {
+        if (items.length > 0) {
+          const sorted = [...items].sort((a, b) =>
+            b.submittedAt.localeCompare(a.submittedAt)
+          );
+          setLeaveRequests(sorted);
+
+          // Sinkronisasi real-time ke model permissions agar antarmuka riwayat praktikan ter-update otomatis
+          const mappedPermissions: Permission[] = sorted.map((req) => ({
+            id: req.id,
+            sessionId: req.sessionId,
+            userId: req.userId,
+            studentName: req.userName,
+            studentEmail: req.userEmail,
+            reason: req.reason,
+            sentiment: req.sentiment,
+            category: req.category as PermissionCategory,
+            aiAnalysis: req.aiAnalysis,
+            status: req.status,
+            createdAt: req.submittedAt,
+          }));
+          setPermissions(mappedPermissions);
+
+          markRealtimeSync();
+        }
+      }
+    );
 
     const unsubUsers = subscribeToCollection<User>(COLLECTIONS.USERS, (items) => {
       if (items.length > 0) setUsers(items);
@@ -156,10 +277,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubClasses?.();
       unsubSchedules?.();
       unsubSessions?.();
+      unsubLogs?.();
       unsubAttendance?.();
+      unsubLeaves?.();
       unsubUsers?.();
     };
-  }, []);
+  }, [markRealtimeSync]);
 
   // SRS-07: Create Kelas Praktikum
   const createClass = useCallback(async (input: LabClassFormInput): Promise<LabClass> => {
@@ -208,7 +331,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((cls) => (cls.id === classId ? { ...cls, ...updatedFields } : cls))
       );
 
-      // Sinkronkan courseCode, title, dan className ke schedules yang terkait dengan classId
       const relatedScheduleIds: string[] = [];
       setSchedules((prev) =>
         prev.map((sch) => {
@@ -276,6 +398,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const scheduleId = `schedule-${timestamp}`;
       const sessionId = `session-${timestamp}`;
+      const initialStatus = input.status ?? 'CLOSED';
 
       const newSchedule: Schedule = {
         id: scheduleId,
@@ -296,13 +419,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         classId: input.classId,
         scheduleId,
         assistantId: input.assistantId,
-        status: input.status ?? 'CLOSED',
+        status: initialStatus,
+        openedAt: initialStatus === 'OPEN' ? now : undefined,
+        lastUpdatedBy: input.assistantId,
         createdAt: now,
         updatedAt: now,
       };
 
       setSchedules((prev) => [...prev, newSchedule]);
       setSessions((prev) => [...prev, newSession]);
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreCreateSessionAndSchedule(newSchedule, newSession);
@@ -312,10 +438,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         ...newSession,
         schedule: newSchedule,
         assistant: users.find((u) => u.id === newSession.assistantId),
+        lastUpdatedByUser: users.find((u) => u.id === newSession.assistantId),
         attendanceCount: 0,
       };
     },
-    [users]
+    [users, markRealtimeSync]
   );
 
   // SRS-07: Update Sesi & Jadwal Praktikum
@@ -326,11 +453,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       const scheduleId = existingSession.scheduleId;
       const now = new Date().toISOString();
+      const nextStatus = input.status ?? existingSession.status;
 
       const sessionUpdates: Partial<Session> = {
         classId: input.classId,
         assistantId: input.assistantId,
-        status: input.status ?? existingSession.status,
+        status: nextStatus,
+        openedAt:
+          nextStatus === 'OPEN' && existingSession.status !== 'OPEN'
+            ? now
+            : existingSession.openedAt,
+        closedAt:
+          nextStatus === 'CLOSED' && existingSession.status === 'OPEN'
+            ? now
+            : existingSession.closedAt,
+        lastUpdatedBy: input.assistantId,
         updatedAt: now,
       };
 
@@ -354,6 +491,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSchedules((prev) =>
         prev.map((sch) => (sch.id === scheduleId ? { ...sch, ...scheduleUpdates } : sch))
       );
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreUpdateSessionAndSchedule(
@@ -366,7 +504,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions]
+    [sessions, markRealtimeSync]
   );
 
   // SRS-07: Delete Sesi & Jadwal Praktikum
@@ -383,6 +521,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       setSchedules((prev) => prev.filter((sch) => sch.id !== scheduleId));
       setAttendance((prev) => prev.filter((a) => a.sessionId !== sessionId));
+      setLeaveRequests((prev) => prev.filter((l) => l.sessionId !== sessionId));
+      setStatusLogs((prev) => prev.filter((log) => log.sessionId !== sessionId));
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreDeleteSessionAndSchedule(
@@ -394,47 +535,204 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions, attendance]
+    [sessions, attendance, markRealtimeSync]
   );
 
-  // Membuka sesi praktikum
-  const openSession = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, status: 'OPEN' as SessionStatus } : s))
-    );
-    if (isFirebaseConfigured) {
-      firestoreUpdateSessionStatus(sessionId, 'OPEN');
-    }
-  }, []);
+  // SRS-08: Fungsi inti transisi status sesi dengan audit log, loading state & rollback
+  const changeSessionStatus = useCallback(
+    async (
+      sessionId: string,
+      targetStatus: SessionStatus,
+      actorAssistantId?: string
+    ): Promise<boolean> => {
+      const existing = sessions.find((s) => s.id === sessionId);
+      if (!existing || existing.status === targetStatus) return false;
 
-  // Menutup sesi praktikum
-  const closeSession = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, status: 'CLOSED' as SessionStatus } : s))
-    );
-    if (isFirebaseConfigured) {
-      firestoreUpdateSessionStatus(sessionId, 'CLOSED');
-    }
-  }, []);
+      const now = new Date().toISOString();
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : existing.assistantId || currentAssistantId;
 
-  // Toggle status sesi praktikum
-  const toggleSessionStatus = useCallback((sessionId: string) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id === sessionId) {
-          const nextStatus: SessionStatus = s.status === 'OPEN' ? 'CLOSED' : 'OPEN';
-          if (isFirebaseConfigured) {
-            firestoreUpdateSessionStatus(sessionId, nextStatus);
-          }
-          return { ...s, status: nextStatus };
+      const actorUser = users.find((u) => u.id === effectiveActorId);
+      const isSubstitute = effectiveActorId !== existing.assistantId;
+
+      const metadata = {
+        openedAt: targetStatus === 'OPEN' ? now : existing.openedAt,
+        closedAt: targetStatus === 'CLOSED' ? now : existing.closedAt,
+        lastUpdatedBy: effectiveActorId,
+      };
+
+      const newLog: SessionStatusLog = {
+        id: `log-${sessionId}-${Date.now()}`,
+        sessionId,
+        previousStatus: existing.status,
+        newStatus: targetStatus,
+        changedBy: effectiveActorId,
+        changedByName: actorUser?.name ?? 'Asisten Lab',
+        isSubstitute,
+        changedAt: now,
+      };
+
+      setUpdatingSessionIds((prev) =>
+        prev.includes(sessionId) ? prev : [...prev, sessionId]
+      );
+
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId
+            ? {
+                ...s,
+                status: targetStatus,
+                ...metadata,
+                updatedAt: now,
+              }
+            : s
+        )
+      );
+      setStatusLogs((prev) => [newLog, ...prev]);
+      markRealtimeSync();
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
         }
-        return s;
-      })
-    );
-  }, []);
+        return true;
+      } catch (err) {
+        console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? existing : s))
+        );
+        setStatusLogs((prev) => prev.filter((l) => l.id !== newLog.id));
+        return false;
+      } finally {
+        setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
+      }
+    },
+    [sessions, users, currentAssistantId, markRealtimeSync]
+  );
 
+  const openSession = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      return changeSessionStatus(sessionId, 'OPEN', actorAssistantId);
+    },
+    [changeSessionStatus]
+  );
+
+  const closeSession = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      return changeSessionStatus(sessionId, 'CLOSED', actorAssistantId);
+    },
+    [changeSessionStatus]
+  );
+
+  const toggleSessionStatus = useCallback(
+    async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
+      const target = sessions.find((s) => s.id === sessionId);
+      if (!target) return false;
+      const nextStatus: SessionStatus = target.status === 'OPEN' ? 'CLOSED' : 'OPEN';
+      return changeSessionStatus(sessionId, nextStatus, actorAssistantId);
+    },
+    [sessions, changeSessionStatus]
+  );
+
+  const closeAllOpenSessions = useCallback(
+    async (
+      assistantIdFilter?: string,
+      actorAssistantId?: string
+    ): Promise<number> => {
+      const openTargets = sessions.filter((s) => {
+        if (s.status !== 'OPEN') return false;
+        if (assistantIdFilter && assistantIdFilter !== 'ALL') {
+          return s.assistantId === assistantIdFilter;
+        }
+        return true;
+      });
+
+      if (openTargets.length === 0) return 0;
+
+      const now = new Date().toISOString();
+      const targetIds = openTargets.map((s) => s.id);
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : currentAssistantId;
+      const actorUser = users.find((u) => u.id === effectiveActorId);
+
+      const newLogs: SessionStatusLog[] = openTargets.map((s, idx) => ({
+        id: `log-${s.id}-${Date.now()}-${idx}`,
+        sessionId: s.id,
+        previousStatus: 'OPEN',
+        newStatus: 'CLOSED',
+        changedBy: effectiveActorId,
+        changedByName: actorUser?.name ?? 'Asisten Lab',
+        isSubstitute: effectiveActorId !== s.assistantId,
+        changedAt: now,
+      }));
+
+      setUpdatingSessionIds((prev) => Array.from(new Set([...prev, ...targetIds])));
+
+      const previousSessionsSnapshot = sessions;
+      setSessions((prev) =>
+        prev.map((s) =>
+          targetIds.includes(s.id)
+            ? {
+                ...s,
+                status: 'CLOSED' as SessionStatus,
+                closedAt: now,
+                lastUpdatedBy: effectiveActorId,
+                updatedAt: now,
+              }
+            : s
+        )
+      );
+      setStatusLogs((prev) => [...newLogs, ...prev]);
+      markRealtimeSync();
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreBatchCloseSessions(
+            targetIds,
+            now,
+            effectiveActorId,
+            newLogs
+          );
+        }
+        return targetIds.length;
+      } catch (err) {
+        console.warn('[SessionContext] Gagal menutup semua sesi, rollback:', err);
+        setSessions(previousSessionsSnapshot);
+        const logIds = new Set(newLogs.map((l) => l.id));
+        setStatusLogs((prev) => prev.filter((l) => !logIds.has(l.id)));
+        return 0;
+      } finally {
+        setUpdatingSessionIds((prev) =>
+          prev.filter((id) => !targetIds.includes(id))
+        );
+      }
+    },
+    [sessions, users, currentAssistantId, markRealtimeSync]
+  );
+
+  const isSessionUpdating = useCallback(
+    (sessionId: string) => updatingSessionIds.includes(sessionId),
+    [updatingSessionIds]
+  );
+
+  const getSessionStatusLogs = useCallback(
+    (sessionId: string): SessionStatusLog[] =>
+      statusLogs.filter((log) => log.sessionId === sessionId),
+    [statusLogs]
+  );
+
+  // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
-    (sessionId: string, userId: string, recordedAt: string): boolean => {
+    async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
+      const targetSession = sessions.find((s) => s.id === sessionId);
+      if (targetSession && targetSession.status !== 'OPEN') {
+        throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
+      }
+
       const alreadyRecorded = attendanceRef.current.some(
         (record) => record.sessionId === sessionId && record.userId === userId
       );
@@ -450,14 +748,94 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
+      markRealtimeSync();
 
       if (isFirebaseConfigured) {
-        firestoreRecordAttendance(newRecord);
+        await firestoreRecordAttendance(newRecord);
       }
 
       return true;
     },
-    []
+    [sessions, markRealtimeSync]
+  );
+
+  // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
+  const reviewLeaveRequest = useCallback(
+    async (
+      requestId: string,
+      decision: Exclude<LeaveStatus, 'PENDING'>,
+      reviewerNote?: string,
+      actorAssistantId?: string
+    ): Promise<boolean> => {
+      const existing = leaveRequests.find((l) => l.id === requestId);
+      if (!existing) return false;
+
+      const now = new Date().toISOString();
+      const sessionOfRequest = sessions.find((s) => s.id === existing.sessionId);
+      const effectiveActorId =
+        actorAssistantId && actorAssistantId !== 'ALL'
+          ? actorAssistantId
+          : sessionOfRequest?.assistantId || currentAssistantId;
+
+      const reviewerUser = users.find((u) => u.id === effectiveActorId);
+      const trimmedNote = reviewerNote?.trim() || undefined;
+
+      const metadata = {
+        reviewedBy: effectiveActorId,
+        reviewedByName: reviewerUser?.name ?? 'Asisten Lab',
+        reviewedAt: now,
+        reviewerNote: trimmedNote,
+      };
+
+      setReviewingLeaveIds((prev) =>
+        prev.includes(requestId) ? prev : [...prev, requestId]
+      );
+
+      setLeaveRequests((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: decision,
+                ...metadata,
+              }
+            : item
+        )
+      );
+      setPermissions((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: decision,
+              }
+            : item
+        )
+      );
+      markRealtimeSync();
+
+      try {
+        if (isFirebaseConfigured) {
+          await firestoreReviewLeaveRequest(requestId, decision, metadata);
+        }
+        return true;
+      } catch (err) {
+        console.warn('[SessionContext] Gagal memperbarui keputusan izin, rollback:', err);
+        setLeaveRequests((prev) =>
+          prev.map((item) => (item.id === requestId ? existing : item))
+        );
+        return false;
+      } finally {
+        setReviewingLeaveIds((prev) => prev.filter((id) => id !== requestId));
+      }
+    },
+    [leaveRequests, sessions, users, currentAssistantId, markRealtimeSync]
+  );
+
+  const getSessionLeaveRequests = useCallback(
+    (sessionId: string): LeaveRequest[] =>
+      leaveRequests.filter((l) => l.sessionId === sessionId),
+    [leaveRequests]
   );
 
   const getClassById = useCallback(
@@ -501,59 +879,92 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       ...sess,
       schedule: getScheduleById(sess.scheduleId),
       assistant: getAssistantById(sess.assistantId),
+      lastUpdatedByUser: sess.lastUpdatedBy
+        ? getAssistantById(sess.lastUpdatedBy)
+        : undefined,
       attendanceCount: getAttendanceCount(sess.id),
     }));
   }, [sessions, getScheduleById, getAssistantById, getAttendanceCount]);
 
-  // Mengambil seluruh riwayat presensi beserta identitas praktikan pada suatu sesi
+  // Mengambil seluruh riwayat presensi beserta identitas praktikan pada suatu sesi (terurut waktu terbaru)
   const getSessionAttendanceRecords = useCallback(
     (sessionId: string): AttendanceRecord[] => {
       const records = attendance.filter((a) => a.sessionId === sessionId);
-      return records.map((rec) => {
-        const student = users.find((u) => u.id === rec.userId);
-        return {
-          id: rec.id,
-          sessionId: rec.sessionId,
-          userId: rec.userId,
-          userName: student?.name ?? 'Praktikan Tidak Dikenal',
-          userEmail: student?.email ?? '-',
-          recordedAt: rec.recordedAt,
-        };
-      });
+      return records
+        .map((rec) => {
+          const student = users.find((u) => u.id === rec.userId);
+          return {
+            id: rec.id,
+            sessionId: rec.sessionId,
+            userId: rec.userId,
+            userName: student?.name ?? 'Praktikan Tidak Dikenal',
+            userEmail: student?.email ?? '-',
+            recordedAt: rec.recordedAt,
+          };
+        })
+        .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
     },
     [attendance, users]
   );
 
-  // Mengambil daftar praktikan terdaftar
   const getPractitioners = useCallback((): User[] => {
     return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
-  // SRS-11: Mengajukan izin baru
+  // Mengajukan izin baru dengan analisis AI sentimen dan persistensi Firestore
   const addPermission = useCallback(
     (data: {
       sessionId: string;
       reason: string;
+      sentiment?: SentimentLabel;
       category?: PermissionCategory;
       aiAnalysis?: string;
     }): Permission => {
       const student = users.find((u) => u.id === currentStudentId);
+      const now = new Date().toISOString();
+      const requestId = `leave-${data.sessionId}-${currentStudentId}-${Date.now()}`;
+
       const newPermission: Permission = {
-        id: `permission-${Date.now()}`,
+        id: requestId,
         sessionId: data.sessionId,
         userId: currentStudentId,
         studentName: student?.name ?? 'Praktikan',
         studentEmail: student?.email ?? 'praktikan@example.test',
         reason: data.reason,
-        category: data.category ?? 'Unclassified',
+        sentiment: data.sentiment,
+        category: data.category,
         aiAnalysis: data.aiAnalysis,
         status: 'PENDING',
-        createdAt: new Date().toISOString(),
+        createdAt: now,
       };
+
+      const newLeaveRequest: LeaveRequest = {
+        id: requestId,
+        sessionId: data.sessionId,
+        userId: currentStudentId,
+        userName: student?.name ?? 'Praktikan',
+        userEmail: student?.email ?? 'praktikan@example.test',
+        category: (data.category as LeaveCategory) || 'LAINNYA',
+        reason: data.reason,
+        status: 'PENDING',
+        submittedAt: now,
+        sentiment: data.sentiment,
+        aiAnalysis: data.aiAnalysis,
+      };
+
       setPermissions((prev) => [newPermission, ...prev]);
+      setLeaveRequests((prev) => [newLeaveRequest, ...prev]);
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        firestoreSubmitLeaveRequest(newLeaveRequest).catch((err) => {
+          console.warn('[SessionContext] Gagal menyimpan izin ke Firestore:', err);
+        });
+      }
+
       return newPermission;
     },
-    [currentStudentId, users]
+    [currentStudentId, users, markRealtimeSync]
   );
 
   // SRS-11: Filter riwayat izin milik praktikan tertentu
@@ -570,6 +981,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setPermissions((prev) =>
         prev.map((p) => (p.id === permissionId ? { ...p, status } : p))
       );
+      setLeaveRequests((prev) =>
+        prev.map((l) => (l.id === permissionId ? { ...l, status } : l))
+      );
     },
     []
   );
@@ -579,10 +993,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       classes,
       sessions,
       schedules,
+      statusLogs,
+      updatingSessionIds,
       users,
       attendance,
+      leaveRequests,
+      reviewingLeaveIds,
+      lastRealtimeSyncAt,
+      realtimeEventCount,
+      loading,
+      error,
       isFirestoreConnected,
-      currentAssistantId,
+      currentAssistantId: profile?.role === 'asisten' ? profile.id : currentAssistantId,
       setCurrentAssistantId,
       createClass,
       updateClass,
@@ -593,7 +1015,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      closeAllOpenSessions,
+      isSessionUpdating,
+      getSessionStatusLogs,
       recordAttendance,
+      reviewLeaveRequest,
+      getSessionLeaveRequests,
       getClassById,
       getScheduleById,
       getAssistantById,
@@ -603,7 +1030,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionAttendanceRecords,
       getPractitioners,
       permissions,
-      currentStudentId,
+      currentStudentId: profile?.role === 'praktikan' ? profile.id : currentStudentId,
       setCurrentStudentId,
       addPermission,
       getPermissionsByUser,
@@ -613,9 +1040,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       classes,
       sessions,
       schedules,
+      statusLogs,
+      updatingSessionIds,
       users,
       attendance,
+      leaveRequests,
+      reviewingLeaveIds,
+      lastRealtimeSyncAt,
+      realtimeEventCount,
+      loading,
+      error,
       isFirestoreConnected,
+      profile,
       currentAssistantId,
       createClass,
       updateClass,
@@ -626,7 +1062,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       openSession,
       closeSession,
       toggleSessionStatus,
+      closeAllOpenSessions,
+      isSessionUpdating,
+      getSessionStatusLogs,
       recordAttendance,
+      reviewLeaveRequest,
+      getSessionLeaveRequests,
       getClassById,
       getScheduleById,
       getAssistantById,
@@ -646,10 +1087,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-export function useSessionContext(): SessionContextValue {
+export function useSessionContext() {
   const context = useContext(SessionContext);
-  if (!context) {
-    throw new Error('useSessionContext must be used within a SessionProvider');
-  }
+  if (!context) throw new Error('useSessionContext must be used within SessionProvider');
   return context;
 }

@@ -1,16 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
-  Pressable,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { SessionCard } from '@/components/asisten/session-card';
+import {
+  SessionCard,
+  confirmSessionStatusChange,
+} from '@/components/asisten/session-card';
+import { ActiveSessionsControlBanner } from '@/components/asisten/active-sessions-banner';
 import {
   ClassCard,
   LabClassWithDetails,
@@ -28,6 +32,7 @@ import {
   useSessionContext,
   SessionWithDetails,
 } from '@/context/session-context';
+import { useAuth } from '@/context/auth-context';
 import type {
   LabClass,
   LabClassFormInput,
@@ -43,7 +48,9 @@ export default function HomeScreen() {
   const {
     classes,
     users,
+    updatingSessionIds,
     isFirestoreConnected,
+    setCurrentAssistantId,
     createClass,
     updateClass,
     deleteClass,
@@ -51,9 +58,13 @@ export default function HomeScreen() {
     updateSessionSchedule,
     deleteSessionSchedule,
     toggleSessionStatus,
+    closeAllOpenSessions,
+    getSessionStatusLogs,
     getClassesWithDetails,
     getSessionsWithDetails,
   } = useSessionContext();
+  const { profile, logout } = useAuth();
+  const { loading, error } = useSessionContext();
 
   const [activeSubTab, setActiveSubTab] = useState<ManagementSubTab>('SESSIONS');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
@@ -77,8 +88,26 @@ export default function HomeScreen() {
     [users]
   );
 
+  const activeAssistant = useMemo(
+    () => assistants.find((a) => a.id === selectedAssistantId),
+    [assistants, selectedAssistantId]
+  );
+
+  const handleSelectAssistant = (id: string) => {
+    setSelectedAssistantId(id);
+    if (id !== 'ALL') {
+      setCurrentAssistantId(id);
+    }
+  };
+
   const allClassesWithDetails = getClassesWithDetails();
   const allSessionsWithDetails = getSessionsWithDetails();
+
+  // Sesi yang sedang berstatus OPEN (SRS-08)
+  const openSessions = useMemo(
+    () => allSessionsWithDetails.filter((s) => s.status === 'OPEN'),
+    [allSessionsWithDetails]
+  );
 
   // Hitung jumlah statistik sesi
   const counts = useMemo(() => {
@@ -118,6 +147,11 @@ export default function HomeScreen() {
     );
   }, [allSessionsWithDetails, activeModalSession]);
 
+  const currentModalLogs = useMemo(() => {
+    if (!currentModalSession) return [];
+    return getSessionStatusLogs(currentModalSession.id);
+  }, [currentModalSession, getSessionStatusLogs]);
+
   const handleOpenDetail = (session: SessionWithDetails) => {
     setActiveModalSession(session);
   };
@@ -126,8 +160,22 @@ export default function HomeScreen() {
     setActiveModalSession(null);
   };
 
+  // SRS-08: Handler Toggle Status Sesi dengan pencatatan identitas asisten aktif
   const handleToggleStatus = (sessionId: string) => {
-    toggleSessionStatus(sessionId);
+    toggleSessionStatus(sessionId, selectedAssistantId);
+  };
+
+  const handleBannerCloseSingle = (session: SessionWithDetails) => {
+    confirmSessionStatusChange({
+      session,
+      selectedAssistantId,
+      activeAssistant,
+      onConfirm: () => toggleSessionStatus(session.id, selectedAssistantId),
+    });
+  };
+
+  const handleCloseAllOpenSessions = () => {
+    closeAllOpenSessions('ALL', selectedAssistantId);
   };
 
   // Handlers CRUD Kelas (SRS-07)
@@ -222,11 +270,12 @@ export default function HomeScreen() {
           </View>
 
           <ThemedText type="title" style={styles.title}>
-            Manajemen Praktikum & Jadwal
+            Manajemen Praktikum & Status Sesi
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-07: Kelola data kelas praktikum (classes) serta jadwal sesi pertemuan (sessions), dan pantau status sesi secara real-time.
+            Halo, {profile?.name ?? 'Asisten'}. Kelola kelas & jadwal praktikum, kontrol status pembukaan/penutupan sesi (OPEN/CLOSED), serta pantau kehadiran praktikan.
           </ThemedText>
+          <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
         </View>
 
         {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas (SRS-07) */}
@@ -268,20 +317,29 @@ export default function HomeScreen() {
         <SessionFilterHeader
           assistants={assistants}
           selectedAssistantId={selectedAssistantId}
-          onSelectAssistant={setSelectedAssistantId}
+          onSelectAssistant={handleSelectAssistant}
           statusFilter={statusFilter}
           onSelectStatusFilter={setStatusFilter}
           counts={counts}
         />
 
         {activeSubTab === 'SESSIONS' ? (
-          /* TAB 1: JADWAL SESI PRAKTIKUM */
+          /* TAB 1: JADWAL SESI & KONTROL STATUS (SRS-07 & SRS-08) */
           <View style={styles.sessionList}>
+            {/* SRS-08: Banner Kontrol Cepat Sesi Aktif (OPEN) */}
+            <ActiveSessionsControlBanner
+              openSessions={openSessions}
+              selectedAssistantId={selectedAssistantId}
+              activeAssistant={activeAssistant}
+              updatingSessionIds={updatingSessionIds}
+              onCloseSingleSession={handleBannerCloseSingle}
+              onCloseAllSessions={handleCloseAllOpenSessions}
+            />
+
             <View style={styles.listHeader}>
               <ThemedText type="subtitle" style={styles.listTitle}>
                 Daftar Jadwal Sesi ({filteredSessions.length})
               </ThemedText>
-
               <Pressable
                 onPress={() => handleOpenCreateSession()}
                 style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
@@ -291,14 +349,20 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            {filteredSessions.length === 0 ? (
+            {loading ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Memuat sesi…
+                </ThemedText>
+              </ThemedView>
+            ) : filteredSessions.length === 0 ? (
               <ThemedView type="backgroundElement" style={styles.emptyContainer}>
                 <ThemedText style={styles.emptyIcon}>📂</ThemedText>
                 <ThemedText type="subtitle" style={styles.emptyTitle}>
                   Tidak ada sesi praktikum
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.
+                  {error ?? 'Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.'}
                 </ThemedText>
               </ThemedView>
             ) : (
@@ -306,6 +370,9 @@ export default function HomeScreen() {
                 <SessionCard
                   key={session.id}
                   session={session}
+                  selectedAssistantId={selectedAssistantId}
+                  activeAssistant={activeAssistant}
+                  isUpdating={updatingSessionIds.includes(session.id)}
                   onOpenDetail={handleOpenDetail}
                   onToggleStatus={handleToggleStatus}
                   onEditSession={handleOpenEditSession}
@@ -356,10 +423,18 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* Modal Detail Sesi Praktikum */}
+      {/* Modal Detail Sesi & Riwayat Status (SRS-08) */}
       <SessionDetailModal
         session={currentModalSession}
         visible={!!currentModalSession}
+        selectedAssistantId={selectedAssistantId}
+        activeAssistant={activeAssistant}
+        isUpdating={
+          currentModalSession
+            ? updatingSessionIds.includes(currentModalSession.id)
+            : false
+        }
+        statusLogs={currentModalLogs}
         onClose={handleCloseDetail}
         onToggleStatus={handleToggleStatus}
         onEditSession={handleOpenEditSession}

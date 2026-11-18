@@ -2,6 +2,10 @@ export type Role = "praktikan" | "asisten";
 
 export type SessionStatus = "OPEN" | "CLOSED";
 
+export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type LeaveCategory = "SAKIT" | "DISPENSASI" | "IZIN_AKADEMIK" | "LAINNYA";
+
 export interface User {
   id: string;
   name: string;
@@ -43,7 +47,7 @@ export interface Schedule {
 }
 
 /**
- * SRS-07: Representasi Sesi Praktikum (collection: sessions)
+ * SRS-07 & SRS-08: Representasi Sesi Praktikum (collection: sessions)
  */
 export interface Session {
   id: string;
@@ -51,8 +55,25 @@ export interface Session {
   scheduleId: string;
   assistantId: string;
   status: SessionStatus;
+  openedAt?: string;
+  closedAt?: string;
+  lastUpdatedBy?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * SRS-08: Catatan Riwayat Perubahan Status Sesi (OPEN / CLOSED)
+ */
+export interface SessionStatusLog {
+  id: string;
+  sessionId: string;
+  previousStatus: SessionStatus;
+  newStatus: SessionStatus;
+  changedBy: string;
+  changedByName: string;
+  isSubstitute?: boolean;
+  changedAt: string;
 }
 
 export interface Attendance {
@@ -71,12 +92,16 @@ export interface AttendanceRecord {
   recordedAt: string;
 }
 
-// --- SRS-11 s/d SRS-13: Modul Pengajuan Izin & Integrasi AI ---
+// --- Modul Pengajuan Izin & Integrasi AI Sentimen ---
+export type SentimentLabel = "positif" | "netral" | "negatif" | null;
+
 export type PermissionStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export type PermissionCategory =
   | "SAKIT"
   | "AKADEMIK"
+  | "IZIN_AKADEMIK"
+  | "DISPENSASI"
   | "DARURAT"
   | "LAINNYA"
   | "Unclassified";
@@ -88,10 +113,33 @@ export interface Permission {
   studentName: string;
   studentEmail: string;
   reason: string;
-  category: PermissionCategory;
+  sentiment?: SentimentLabel;
+  category?: PermissionCategory;
   aiAnalysis?: string;
   status: PermissionStatus;
   createdAt: string;
+}
+
+/**
+ * SRS-10: Representasi Pengajuan Izin Praktikan (collection: leave_requests)
+ */
+export interface LeaveRequest {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  category: LeaveCategory;
+  reason: string;
+  attachmentName?: string;
+  status: LeaveStatus;
+  submittedAt: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+  reviewerNote?: string;
+  sentiment?: SentimentLabel;
+  aiAnalysis?: string;
 }
 
 /**
