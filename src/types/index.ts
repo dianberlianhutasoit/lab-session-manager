@@ -114,6 +114,16 @@ export interface Attendance {
   sessionId: string;
   userId: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: "LOCATION" | "MANUAL";
+}
+
+export interface AttendanceLocationPayload {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
 }
 
 export interface AttendanceRecord {
@@ -123,6 +133,10 @@ export interface AttendanceRecord {
   userName: string;
   userEmail: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: "LOCATION" | "MANUAL";
 }
 
 // --- Modul Pengajuan Izin & Integrasi AI Sentimen ---

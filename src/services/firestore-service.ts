@@ -9,6 +9,7 @@ import {
   query,
   where,
   writeBatch,
+  runTransaction,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
@@ -413,7 +414,23 @@ export async function firestoreBatchCloseSessions(
  */
 export async function firestoreRecordAttendance(record: Attendance): Promise<void> {
   if (!db) return;
-  await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), stripUndefined(record));
+
+  const attendanceRef = doc(db, COLLECTIONS.ATTENDANCE, record.id);
+  const sessionRef = doc(db, COLLECTIONS.SESSIONS, record.sessionId);
+
+  await runTransaction(db, async (transaction) => {
+    const sessionSnapshot = await transaction.get(sessionRef);
+    if (!sessionSnapshot.exists() || sessionSnapshot.data()?.status !== "OPEN") {
+      throw new Error("Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.");
+    }
+
+    const attendanceSnapshot = await transaction.get(attendanceRef);
+    if (attendanceSnapshot.exists()) {
+      throw new Error("Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.");
+    }
+
+    transaction.set(attendanceRef, stripUndefined(record));
+  });
 }
 
 /**

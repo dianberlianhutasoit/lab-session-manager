@@ -68,6 +68,11 @@ export function AttendanceRecordCard({ record, index }: AttendanceRecordCardProp
         <ThemedText type="small" themeColor="textSecondary" style={styles.emailText}>
           {record.userEmail}
         </ThemedText>
+        {record.method === 'LOCATION' && record.distanceMeters !== undefined ? (
+          <ThemedText type="small" style={styles.locationText}>
+            📍 Jarak dari lab: {Math.round(record.distanceMeters)} m
+          </ThemedText>
+        ) : null}
         <View style={styles.timeRow}>
           <ThemedText type="small" style={styles.timeLabel}>
             🕒 Presensi:
@@ -127,6 +132,11 @@ const styles = StyleSheet.create({
   },
   emailText: {
     fontSize: 12,
+  },
+  locationText: {
+    fontSize: 11,
+    color: '#10B981',
+    fontWeight: '600',
   },
   timeRow: {
     flexDirection: 'row',

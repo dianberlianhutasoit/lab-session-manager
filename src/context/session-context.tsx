@@ -43,6 +43,7 @@ import { sendPushNotification } from '@/services/notification-service';
 import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
+  AttendanceLocationPayload,
   AttendanceRecord,
   Lab,
   LabFormInput,
@@ -63,6 +64,7 @@ import type {
   User,
 } from '@/types';
 import type { LabClassWithDetails } from '@/components/asisten/class-card';
+import { distanceInMeters, findLabForRoom } from '@/utils/attendance-location';
 
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
@@ -110,7 +112,12 @@ interface SessionContextValue {
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
-  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
+  recordAttendance: (
+    sessionId: string,
+    userId: string,
+    recordedAt: string,
+    location?: AttendanceLocationPayload
+  ) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
     decision: Exclude<LeaveStatus, 'PENDING'>,
@@ -808,9 +815,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
-    async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
+    async (
+      sessionId: string,
+      userId: string,
+      recordedAt: string,
+      location?: AttendanceLocationPayload
+    ): Promise<boolean> => {
       const targetSession = sessions.find((s) => s.id === sessionId);
-      if (targetSession && targetSession.status !== 'OPEN') {
+      if (!targetSession) {
+        throw new Error('Sesi praktikum tidak ditemukan.');
+      }
+      if (targetSession.status !== 'OPEN') {
         throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
       }
 
@@ -819,25 +834,54 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       );
       if (alreadyRecorded) return false;
 
+      let attendanceLocation: Pick<Attendance, 'latitude' | 'longitude' | 'distanceMeters' | 'method'> = {
+        method: 'MANUAL',
+      };
+      if (location) {
+        const schedule = schedules.find((item) => item.id === targetSession.scheduleId);
+        const lab = schedule ? findLabForRoom(labs, schedule.room) : undefined;
+        if (!lab) {
+          throw new Error('Laboratorium untuk jadwal ini tidak ditemukan. Periksa data ruang dan laboratorium.');
+        }
+        const distanceMeters = distanceInMeters(
+          location.latitude,
+          location.longitude,
+          lab.latitude,
+          lab.longitude
+        );
+        if (distanceMeters > lab.radius) {
+          throw new Error(
+            `Presensi ditolak: jarak Anda ${Math.round(distanceMeters)} m dari laboratorium, di luar radius ${lab.radius} m.`
+          );
+        }
+        attendanceLocation = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          distanceMeters,
+          method: 'LOCATION',
+        };
+      }
+
       const newRecord: Attendance = {
         id: `attendance-${sessionId}-${userId}`,
         sessionId,
         userId,
         recordedAt,
+        ...attendanceLocation,
       };
+
+      if (isFirebaseConfigured) {
+        await firestoreRecordAttendance(newRecord);
+      }
 
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
       markRealtimeSync();
 
-      if (isFirebaseConfigured) {
-        await firestoreRecordAttendance(newRecord);
-      }
-
       return true;
     },
-    [sessions, markRealtimeSync]
+    [sessions, schedules, labs, markRealtimeSync]
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -1009,6 +1053,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             userName: student?.name ?? 'Praktikan Tidak Dikenal',
             userEmail: student?.email ?? '-',
             recordedAt: rec.recordedAt,
+            latitude: rec.latitude,
+            longitude: rec.longitude,
+            distanceMeters: rec.distanceMeters,
+            method: rec.method,
           };
         })
         .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
