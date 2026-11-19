@@ -17,6 +17,7 @@ import {
   attendance as initialAttendance,
   leaveRequests as initialLeaveRequests,
   permissions as initialPermissions,
+  labs as initialLabs,
 } from '@/data/dummy';
 import { isFirebaseConfigured } from '@/config/firebase';
 import {
@@ -34,12 +35,17 @@ import {
   firestoreRecordAttendance,
   firestoreReviewLeaveRequest,
   firestoreSubmitLeaveRequest,
+  firestoreCreateLab,
+  firestoreUpdateLab,
+  firestoreDeleteLab,
 } from '@/services/firestore-service';
 import { sendPushNotification } from '@/services/notification-service';
 import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
   AttendanceRecord,
+  Lab,
+  LabFormInput,
   LabClass,
   LabClassFormInput,
   LeaveCategory,
@@ -134,6 +140,16 @@ interface SessionContextValue {
   }) => Permission;
   getPermissionsByUser: (userId: string) => Permission[];
   updatePermissionStatus: (permissionId: string, status: PermissionStatus) => void;
+  // SRS-07 & SRS-10 Sprint 3: Lokasi & Aktivitas Laboratorium
+  labs: Lab[];
+  createLab: (input: LabFormInput) => Promise<Lab>;
+  updateLab: (labId: string, input: Partial<LabFormInput>) => Promise<boolean>;
+  deleteLab: (labId: string) => Promise<boolean>;
+  getLabById: (labId: string) => Lab | undefined;
+  getLabActivity: (labNameOrId: string) => {
+    ongoing: { session: Session; schedule: Schedule } | null;
+    next: { session: Session; schedule: Schedule } | null;
+  };
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -148,6 +164,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const [labs, setLabs] = useState<Lab[]>(initialLabs);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
   const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
   const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(
@@ -273,6 +290,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (items.length > 0) setUsers(items);
     });
 
+    const unsubLabs = subscribeToCollection<Lab>(COLLECTIONS.LABS, (items) => {
+      if (items.length > 0) {
+        setLabs(items);
+        markRealtimeSync();
+      }
+    });
+
     return () => {
       isMounted = false;
       unsubClasses?.();
@@ -282,6 +306,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubAttendance?.();
       unsubLeaves?.();
       unsubUsers?.();
+      unsubLabs?.();
     };
   }, [markRealtimeSync]);
 
@@ -1072,6 +1097,168 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // SRS-07 Sprint 3: Pengelolaan Lokasi Laboratorium (CRUD Labs)
+  const createLab = useCallback(
+    async (input: LabFormInput): Promise<Lab> => {
+      if (!input.name || input.name.trim().length === 0) {
+        throw new Error('Nama laboratorium wajib diisi.');
+      }
+      const lat = Number(input.latitude);
+      const lng = Number(input.longitude);
+      const rad = Number(input.radius);
+
+      if (isNaN(lat) || lat < -90 || lat > 90) {
+        throw new Error('Latitude harus berupa angka antara -90 dan 90.');
+      }
+      if (isNaN(lng) || lng < -180 || lng > 180) {
+        throw new Error('Longitude harus berupa angka antara -180 dan 180.');
+      }
+      if (isNaN(rad) || rad <= 0) {
+        throw new Error('Radius presensi harus berupa angka positif.');
+      }
+
+      const now = new Date().toISOString();
+      const newLab: Lab = {
+        id: `lab-${Date.now()}`,
+        name: input.name.trim(),
+        code: input.code?.trim().toUpperCase(),
+        building: input.building?.trim() || 'Gedung Fasilkom',
+        latitude: lat,
+        longitude: lng,
+        radius: rad,
+        capacity: input.capacity ? Number(input.capacity) : undefined,
+        description: input.description?.trim(),
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setLabs((prev) => [newLab, ...prev]);
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreCreateLab(newLab);
+      }
+
+      return newLab;
+    },
+    [markRealtimeSync]
+  );
+
+  const updateLab = useCallback(
+    async (labId: string, input: Partial<LabFormInput>): Promise<boolean> => {
+      if (input.latitude !== undefined) {
+        const lat = Number(input.latitude);
+        if (isNaN(lat) || lat < -90 || lat > 90) {
+          throw new Error('Latitude harus antara -90 dan 90.');
+        }
+      }
+      if (input.longitude !== undefined) {
+        const lng = Number(input.longitude);
+        if (isNaN(lng) || lng < -180 || lng > 180) {
+          throw new Error('Longitude harus antara -180 dan 180.');
+        }
+      }
+      if (input.radius !== undefined) {
+        const rad = Number(input.radius);
+        if (isNaN(rad) || rad <= 0) {
+          throw new Error('Radius presensi harus lebih dari 0 meter.');
+        }
+      }
+
+      const now = new Date().toISOString();
+      setLabs((prev) =>
+        prev.map((l) => (l.id === labId ? { ...l, ...input, updatedAt: now } : l))
+      );
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreUpdateLab(labId, { ...input, updatedAt: now });
+      }
+
+      return true;
+    },
+    [markRealtimeSync]
+  );
+
+  const deleteLab = useCallback(
+    async (labId: string): Promise<boolean> => {
+      setLabs((prev) => prev.filter((l) => l.id !== labId));
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreDeleteLab(labId);
+      }
+
+      return true;
+    },
+    [markRealtimeSync]
+  );
+
+  const getLabById = useCallback(
+    (labId: string): Lab | undefined => {
+      return labs.find((l) => l.id === labId);
+    },
+    [labs]
+  );
+
+  // SRS-10 & SRS-11: Aktivitas Laboratorium Real-time (Sesi Berlangsung & Berikutnya)
+  const getLabActivity = useCallback(
+    (labNameOrId: string) => {
+      const targetLab = labs.find(
+        (l) => l.id === labNameOrId || l.name.toLowerCase() === labNameOrId.toLowerCase()
+      );
+      const targetName = targetLab ? targetLab.name.toLowerCase().trim() : labNameOrId.toLowerCase().trim();
+
+      const labSchedules = schedules.filter(
+        (s) => s.room && s.room.toLowerCase().trim() === targetName
+      );
+
+      const labItems = labSchedules
+        .map((sch) => {
+          const sess = sessions.find((s) => s.scheduleId === sch.id);
+          return sess ? { schedule: sch, session: sess } : null;
+        })
+        .filter((item): item is { schedule: Schedule; session: Session } => item !== null);
+
+      // 1. Sesi Ongoing: Prioritaskan status 'OPEN'
+      let ongoing = labItems.find((item) => item.session.status === 'OPEN') || null;
+
+      if (!ongoing) {
+        const now = new Date();
+        const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        ongoing =
+          labItems.find(
+            (item) =>
+              item.schedule.startTime <= currentHours && item.schedule.endTime >= currentHours
+          ) || null;
+      }
+
+      // 2. Sesi Berikutnya: Sesi mendatang
+      const now = new Date();
+      const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const ongoingId = ongoing?.session.id;
+
+      const upcomingItems = labItems
+        .filter((item) => item.session.id !== ongoingId)
+        .filter((item) => {
+          if (ongoing) {
+            return item.schedule.startTime >= ongoing.schedule.endTime;
+          }
+          return item.schedule.startTime > currentHours;
+        })
+        .sort((a, b) => a.schedule.startTime.localeCompare(b.schedule.startTime));
+
+      const next = upcomingItems.length > 0 ? upcomingItems[0] : (labItems.find((i) => i.session.id !== ongoingId) || null);
+
+      return {
+        ongoing,
+        next,
+      };
+    },
+    [labs, schedules, sessions]
+  );
+
   const value = useMemo(
     () => ({
       classes,
@@ -1119,6 +1306,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       addPermission,
       getPermissionsByUser,
       updatePermissionStatus,
+      labs,
+      createLab,
+      updateLab,
+      deleteLab,
+      getLabById,
+      getLabActivity,
     }),
     [
       classes,
@@ -1165,6 +1358,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       addPermission,
       getPermissionsByUser,
       updatePermissionStatus,
+      labs,
+      createLab,
+      updateLab,
+      deleteLab,
+      getLabById,
+      getLabActivity,
     ]
   );
 

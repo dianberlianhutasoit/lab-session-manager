@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { router } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
@@ -20,6 +21,8 @@ import {
   LabClassWithDetails,
 } from '@/components/asisten/class-card';
 import { ClassFormModal } from '@/components/asisten/class-form-modal';
+import { LabCard } from '@/components/asisten/lab-card';
+import { LabFormModal } from '@/components/asisten/lab-form-modal';
 import { SessionFormModal } from '@/components/asisten/session-form-modal';
 import {
   SessionFilterHeader,
@@ -34,12 +37,14 @@ import {
 } from '@/context/session-context';
 import { useAuth } from '@/context/auth-context';
 import type {
+  Lab,
+  LabFormInput,
   LabClass,
   LabClassFormInput,
   SessionScheduleFormInput,
 } from '@/types';
 
-type ManagementSubTab = 'SESSIONS' | 'CLASSES';
+type ManagementSubTab = 'SESSIONS' | 'CLASSES' | 'LABS';
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -62,6 +67,10 @@ export default function HomeScreen() {
     getSessionStatusLogs,
     getClassesWithDetails,
     getSessionsWithDetails,
+    labs,
+    createLab,
+    updateLab,
+    deleteLab,
   } = useSessionContext();
   const { profile, logout } = useAuth();
   const { loading, error } = useSessionContext();
@@ -82,6 +91,10 @@ export default function HomeScreen() {
   const [editingSession, setEditingSession] = useState<SessionWithDetails | null>(null);
   const [preselectedClassForSession, setPreselectedClassForSession] =
     useState<LabClass | null>(null);
+
+  // State Modal CRUD Laboratorium (SRS-07 Sprint 3)
+  const [isLabFormVisible, setIsLabFormVisible] = useState(false);
+  const [editingLab, setEditingLab] = useState<Lab | null>(null);
 
   const assistants = useMemo(
     () => users.filter((u) => u.role === 'asisten'),
@@ -222,6 +235,25 @@ export default function HomeScreen() {
     await deleteSessionSchedule(sessionId);
   };
 
+  // Handlers CRUD Laboratorium (SRS-07 Sprint 3)
+  const handleOpenCreateLab = () => {
+    setEditingLab(null);
+    setIsLabFormVisible(true);
+  };
+
+  const handleOpenEditLab = (lab: Lab) => {
+    setEditingLab(lab);
+    setIsLabFormVisible(true);
+  };
+
+  const handleLabFormSubmit = async (data: LabFormInput) => {
+    if (editingLab) {
+      await updateLab(editingLab.id, data);
+    } else {
+      await createLab(data);
+    }
+  };
+
   const insets = {
     ...safeAreaInsets,
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
@@ -278,7 +310,7 @@ export default function HomeScreen() {
           <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
         </View>
 
-        {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas (SRS-07) */}
+        {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas vs Lokasi Lab (SRS-07) */}
         <View style={styles.subTabContainer}>
           <Pressable
             onPress={() => setActiveSubTab('SESSIONS')}
@@ -311,17 +343,35 @@ export default function HomeScreen() {
               🏫 Data Kelas ({allClassesWithDetails.length})
             </ThemedText>
           </Pressable>
+
+          <Pressable
+            onPress={() => setActiveSubTab('LABS')}
+            style={[
+              styles.subTabButton,
+              activeSubTab === 'LABS' && styles.subTabButtonActive,
+            ]}>
+            <ThemedText
+              type="smallBold"
+              style={[
+                styles.subTabText,
+                activeSubTab === 'LABS' && styles.subTabTextActive,
+              ]}>
+              🏢 Lab ({labs.length})
+            </ThemedText>
+          </Pressable>
         </View>
 
         {/* Filter & Overview Component */}
-        <SessionFilterHeader
-          assistants={assistants}
-          selectedAssistantId={selectedAssistantId}
-          onSelectAssistant={handleSelectAssistant}
-          statusFilter={statusFilter}
-          onSelectStatusFilter={setStatusFilter}
-          counts={counts}
-        />
+        {activeSubTab !== 'LABS' ? (
+          <SessionFilterHeader
+            assistants={assistants}
+            selectedAssistantId={selectedAssistantId}
+            onSelectAssistant={handleSelectAssistant}
+            statusFilter={statusFilter}
+            onSelectStatusFilter={setStatusFilter}
+            counts={counts}
+          />
+        ) : null}
 
         {activeSubTab === 'SESSIONS' ? (
           /* TAB 1: JADWAL SESI & KONTROL STATUS (SRS-07 & SRS-08) */
@@ -421,6 +471,55 @@ export default function HomeScreen() {
             )}
           </View>
         )}
+
+        {activeSubTab === 'LABS' && (
+          /* TAB 3: PENGELOLAAN LOKASI LABORATORIUM (SRS-07) */
+          <View style={styles.sessionList}>
+            <View style={styles.listHeader}>
+              <ThemedText type="subtitle" style={styles.listTitle}>
+                Daftar Laboratorium Informatika ({labs.length})
+              </ThemedText>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() => router.push('/maps' as any)}
+                  style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+                  <ThemedText type="smallBold" style={{ color: '#0284C7' }}>
+                    🗺️ Buka Peta
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={handleOpenCreateLab}
+                  style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
+                  <ThemedText type="smallBold" style={styles.primaryAddButtonText}>
+                    + Tambah Lab
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+
+            {labs.length === 0 ? (
+              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                <ThemedText style={styles.emptyIcon}>🏢</ThemedText>
+                <ThemedText type="subtitle" style={styles.emptyTitle}>
+                  Belum ada laboratorium
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                  Silakan klik tombol &quot;+ Tambah Lab&quot; untuk mendaftarkan lokasi dan koordinat laboratorium baru.
+                </ThemedText>
+              </ThemedView>
+            ) : (
+              labs.map((lab) => (
+                <LabCard
+                  key={lab.id}
+                  lab={lab}
+                  onEdit={handleOpenEditLab}
+                  onDelete={deleteLab}
+                  onViewOnMap={() => router.push('/maps' as any)}
+                />
+              ))
+            )}
+          </View>
+        )}
       </View>
 
       {/* Modal Detail Sesi & Riwayat Status (SRS-08) */}
@@ -458,6 +557,17 @@ export default function HomeScreen() {
         assistants={assistants}
         onClose={() => setIsSessionFormVisible(false)}
         onSubmit={handleSessionFormSubmit}
+      />
+
+      {/* Modal Form Tambah / Edit Laboratorium (SRS-07 Sprint 3) */}
+      <LabFormModal
+        visible={isLabFormVisible}
+        initialData={editingLab}
+        onClose={() => {
+          setIsLabFormVisible(false);
+          setEditingLab(null);
+        }}
+        onSubmit={handleLabFormSubmit}
       />
     </ScrollView>
   );
@@ -601,6 +711,19 @@ const styles = StyleSheet.create({
   primaryAddButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
+  },
+  secondaryButton: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
   },
   pressed: {
     opacity: 0.75,

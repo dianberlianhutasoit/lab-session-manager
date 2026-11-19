@@ -18,7 +18,7 @@ export default function MainLayout() {
   if (profile.role !== 'praktikan' && profile.role !== 'asisten') {
     return <View style={styles.state}><Text style={styles.title}>Akses belum tersedia</Text><TouchableOpacity style={styles.button} onPress={() => void logout()}><Text style={styles.buttonText}>Keluar</Text></TouchableOpacity></View>;
   }
-  if (profile.role === 'praktikan' && pathname !== '/praktikan' && !pathname.startsWith('/praktikan/')) return <Redirect href={'/praktikan' as Href} />;
+  if (profile.role === 'praktikan' && pathname !== '/praktikan' && !pathname.startsWith('/praktikan/') && pathname !== '/maps') return <Redirect href={'/praktikan' as Href} />;
   if (profile.role === 'asisten' && (pathname === '/praktikan' || pathname.startsWith('/praktikan/'))) return <Redirect href={'/' as Href} />;
   return <AppTabs />;
 }

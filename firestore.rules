@@ -123,6 +123,16 @@ service cloud.firestore {
         request.resource.data.status == 'PENDING';
       allow update, delete: if isAssistant();
     }
+
+    // ==========================================
+    // 6. KOLEKSI LABS (Laboratorium - SRS-07 Sprint 3)
+    // ==========================================
+    match /labs/{labId} {
+      // Praktikan dan asisten dapat membaca informasi lokasi laboratorium
+      allow read: if isAuthenticated();
+      // Hanya role Asisten yang berhak membuat, mengubah, atau menghapus laboratorium
+      allow write: if isAssistant();
+    }
   }
 }
 
