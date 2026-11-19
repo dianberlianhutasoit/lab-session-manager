@@ -6,6 +6,8 @@ try {
 }
 
 module.exports = ({ config }) => {
+  const googleServicesFile =
+    process.env.GOOGLE_SERVICES_JSON || config.android?.googleServicesFile;
   const googleMapsApiKey =
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
     process.env.GOOGLE_MAPS_API_KEY;
@@ -32,6 +34,7 @@ module.exports = ({ config }) => {
     ...config,
     android: {
       ...config.android,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       config: {
         ...config.android?.config,
         ...(googleMapsApiKey
