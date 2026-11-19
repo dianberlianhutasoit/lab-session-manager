@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -14,6 +15,7 @@ import {
 import { formatTimeWIB } from './active-sessions-banner';
 import { confirmSessionStatusChange } from './session-card';
 import { SessionStatusBadge } from './session-status-badge';
+import { SessionQRModal } from './session-qr-modal';
 
 interface SessionDetailModalProps {
   session: SessionWithDetails | null;
@@ -50,6 +52,7 @@ export function SessionDetailModal({
     attendanceCount,
   } = session;
   const isOpen = status === 'OPEN';
+  const [showQRModal, setShowQRModal] = useState(false);
 
   const handleToggleWithConfirmation = () => {
     confirmSessionStatusChange({
