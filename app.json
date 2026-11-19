@@ -49,7 +49,9 @@
       ],
       [
         "react-native-maps",
-        {}
+        {
+          "androidApiKey": "AIzaSyD0SFGH8uXCvrc4Q8uguyIOIFY5Rp5oUfY"
+        }
       ],
       [
         "expo-notifications",
@@ -62,7 +64,8 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "2.4.0"
+            "kotlinVersion": "2.4.0",
+            "extraProguardRules": "-keep class androidx.work.** { *; }\n-keep class androidx.room.** { *; }\n-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-keep class androidx.work.impl.WorkDatabase { *; }\n-dontwarn androidx.work.**"
           }
         }
       ]
