@@ -1,5 +1,6 @@
 import type {
   Attendance,
+  Lab,
   LabClass,
   LeaveRequest,
   Permission,
@@ -306,5 +307,51 @@ export const permissions: Permission[] = [
     aiAnalysis: "Sentimen terdeteksi: positif",
     status: "APPROVED",
     createdAt: "2026-10-26T14:15:00+07:00",
+  },
+];
+
+/**
+ * SRS-07 & SRS-08: Data Master Laboratorium Informatika
+ * Catatan: Koordinat awal merepresentasikan laboratorium Fasilkom/IT Del sebagai data acuan demo
+ */
+export const labs: Lab[] = [
+  {
+    id: "lab-001",
+    name: "Lab Komputer 1",
+    code: "LK-01",
+    building: "Gedung 5 Lt. 2",
+    latitude: 2.38324,
+    longitude: 99.14845,
+    radius: 30,
+    capacity: 40,
+    description: "Laboratorium pemrograman dasar dan struktur data.",
+    isActive: true,
+    createdAt: "2026-10-01T08:00:00+07:00",
+  },
+  {
+    id: "lab-002",
+    name: "Lab Komputer 2",
+    code: "LK-02",
+    building: "Gedung 5 Lt. 3",
+    latitude: 2.38340,
+    longitude: 99.14855,
+    radius: 30,
+    capacity: 35,
+    description: "Laboratorium rekayasa perangkat lunak dan kecerdasan buatan.",
+    isActive: true,
+    createdAt: "2026-10-01T08:00:00+07:00",
+  },
+  {
+    id: "lab-003",
+    name: "Lab Jaringan",
+    code: "LJ-01",
+    building: "Gedung 7 Lt. 1",
+    latitude: 2.38310,
+    longitude: 99.14825,
+    radius: 35,
+    capacity: 30,
+    description: "Laboratorium jaringan komputer dan sistem terdistribusi.",
+    isActive: true,
+    createdAt: "2026-10-01T08:00:00+07:00",
   },
 ];
