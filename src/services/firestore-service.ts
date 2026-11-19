@@ -9,6 +9,7 @@ import {
   query,
   where,
   writeBatch,
+  runTransaction,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/config/firebase';
@@ -402,11 +403,41 @@ export async function firestoreBatchCloseSessions(
 }
 
 /**
- * Catat presensi praktikan di Firestore
+ * SRS-04 & SRS-05: Catat presensi praktikan di Firestore dengan composite ID dan transaksi atomik:
+ * 1. Validasi status sesi OPEN di dalam transaksi (SRS-04)
+ * 2. Cegah presensi ganda melalui composite ID (${sessionId}_${userId}) & verifikasi keberadaan dokumen (SRS-05)
  */
 export async function firestoreRecordAttendance(record: Attendance): Promise<void> {
   if (!db) return;
-  await setDoc(doc(db, COLLECTIONS.ATTENDANCE, record.id), stripUndefined(record));
+
+  const compositeDocId = record.id.startsWith('attendance-')
+    ? record.id
+    : `${record.sessionId}_${record.userId}`;
+
+  const attendanceRef = doc(db, COLLECTIONS.ATTENDANCE, compositeDocId);
+  const sessionRef = doc(db, COLLECTIONS.SESSIONS, record.sessionId);
+
+  await runTransaction(db, async (transaction) => {
+    // 1. Validasi status sesi di tingkat transaksi (SRS-04)
+    const sessionSnapshot = await transaction.get(sessionRef);
+    if (!sessionSnapshot.exists() || sessionSnapshot.data()?.status !== 'OPEN') {
+      throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
+    }
+
+    // 2. Cegah presensi ganda melalui composite document ID (SRS-05)
+    const existingSnap = await transaction.get(attendanceRef);
+    if (existingSnap.exists()) {
+      throw new Error('Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.');
+    }
+
+    transaction.set(
+      attendanceRef,
+      stripUndefined({
+        ...record,
+        id: compositeDocId,
+      })
+    );
+  });
 }
 
 /**
