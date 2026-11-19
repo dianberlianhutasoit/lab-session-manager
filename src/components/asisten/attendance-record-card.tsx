@@ -1,9 +1,8 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
-import type { AttendanceRecord } from '@/types';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { Spacing } from "@/constants/theme";
+import type { AttendanceRecord } from "@/types";
+import { StyleSheet, View } from "react-native";
 
 interface AttendanceRecordCardProps {
   record: AttendanceRecord;
@@ -15,25 +14,25 @@ export function formatAttendanceTime(dateString: string): string {
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return dateString;
 
-    const day = d.getDate().toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, "0");
     const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'Mei',
-      'Jun',
-      'Jul',
-      'Agu',
-      'Sep',
-      'Okt',
-      'Nov',
-      'Des',
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "Mei",
+      "Jun",
+      "Jul",
+      "Agu",
+      "Sep",
+      "Okt",
+      "Nov",
+      "Des",
     ];
     const month = months[d.getMonth()];
     const year = d.getFullYear();
-    const hours = d.getHours().toString().padStart(2, '0');
-    const minutes = d.getMinutes().toString().padStart(2, '0');
+    const hours = d.getHours().toString().padStart(2, "0");
+    const minutes = d.getMinutes().toString().padStart(2, "0");
 
     return `${day} ${month} ${year}, ${hours}:${minutes} WIB`;
   } catch {
@@ -41,7 +40,10 @@ export function formatAttendanceTime(dateString: string): string {
   }
 }
 
-export function AttendanceRecordCard({ record, index }: AttendanceRecordCardProps) {
+export function AttendanceRecordCard({
+  record,
+  index,
+}: AttendanceRecordCardProps) {
   const initial = record.userName.charAt(0).toUpperCase();
 
   return (
@@ -65,7 +67,11 @@ export function AttendanceRecordCard({ record, index }: AttendanceRecordCardProp
         <ThemedText type="smallBold" style={styles.nameText}>
           {record.userName}
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.emailText}>
+        <ThemedText
+          type="small"
+          themeColor="textSecondary"
+          style={styles.emailText}
+        >
           {record.userEmail}
         </ThemedText>
         <View style={styles.timeRow}>
@@ -76,6 +82,15 @@ export function AttendanceRecordCard({ record, index }: AttendanceRecordCardProp
             {formatAttendanceTime(record.recordedAt)}
           </ThemedText>
         </View>
+        {record.method === "LOCATION" && record.distanceMeters !== undefined ? (
+          <ThemedText type="small" style={styles.methodText}>
+            📍 Radius Lab: {Math.round(record.distanceMeters)} m
+          </ThemedText>
+        ) : record.method === "QR" ? (
+          <ThemedText type="small" style={styles.methodText}>
+            📱 Scan QR Code
+          </ThemedText>
+        ) : null}
       </View>
 
       {/* Status Badge */}
@@ -90,32 +105,32 @@ export function AttendanceRecordCard({ record, index }: AttendanceRecordCardProp
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: Spacing.three,
     borderRadius: 14,
     gap: Spacing.three,
     borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.05)',
+    borderColor: "rgba(0, 0, 0, 0.05)",
   },
   numberBadge: {
     width: 28,
-    alignItems: 'center',
+    alignItems: "center",
   },
   numberText: {
-    color: '#94A3B8',
+    color: "#94A3B8",
     fontSize: 12,
   },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#0284C7',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#0284C7",
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 16,
   },
   infoCol: {
@@ -129,30 +144,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   timeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     marginTop: 2,
   },
   timeLabel: {
     fontSize: 11,
-    color: '#64748B',
+    color: "#64748B",
   },
   timeValue: {
     fontSize: 11,
-    color: '#0369A1',
-    fontWeight: '500',
+    color: "#0369A1",
+    fontWeight: "500",
+  },
+  methodText: {
+    fontSize: 11,
+    color: "#10B981",
+    fontWeight: "600",
+    marginTop: 1,
   },
   statusBadge: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: "#DCFCE7",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#86EFAC',
+    borderColor: "#86EFAC",
   },
   statusText: {
-    color: '#15803D',
+    color: "#15803D",
     fontSize: 11,
   },
 });
