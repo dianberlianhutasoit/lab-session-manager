@@ -46,3 +46,4 @@ example
 
 # Firebase configuration
 google-services.json
+*-firebase-adminsdk-*.json
