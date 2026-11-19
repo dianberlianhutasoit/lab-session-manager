@@ -37,6 +37,14 @@ export default function AppTabs() {
           renderingMode="template"
         />
       </NativeTabs.Trigger>}
+
+      <NativeTabs.Trigger name="maps">
+        <NativeTabs.Trigger.Label>Peta Lab</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          src={require('@/assets/images/tabIcons/explore.png')}
+          renderingMode="template"
+        />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
