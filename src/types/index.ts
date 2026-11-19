@@ -76,11 +76,48 @@ export interface SessionStatusLog {
   changedAt: string;
 }
 
+export type AttendanceMethod = "LOCATION" | "QR" | "MANUAL";
+
+export interface Coordinates {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+}
+
+export interface LabLocationConfig {
+  room: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
+export interface RadiusValidationResult {
+  isWithinRadius: boolean;
+  distanceMeters: number;
+  maxRadiusMeters: number;
+  userCoordinates?: Coordinates;
+  labLocation: LabLocationConfig;
+}
+
+export interface AttendanceLocationPayload {
+  latitude: number;
+  longitude: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
+  qrCodeToken?: string;
+}
+
 export interface Attendance {
   id: string;
   sessionId: string;
   userId: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
+  qrCodeToken?: string;
 }
 
 export interface AttendanceRecord {
@@ -90,6 +127,10 @@ export interface AttendanceRecord {
   userName: string;
   userEmail: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
 }
 
 // --- Modul Pengajuan Izin & Integrasi AI Sentimen ---
