@@ -35,6 +35,22 @@ export interface PushNotificationResult {
 }
 
 /**
+ * Mengecek apakah izin notifikasi saat ini telah diberikan (granted) oleh pengguna.
+ */
+export async function checkNotificationPermissionAsync(): Promise<boolean> {
+  if (!Device.isDevice) {
+    return true;
+  }
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status === 'granted';
+  } catch (error) {
+    console.warn('[NotificationService] Gagal memeriksa status izin notifikasi:', error);
+    return false;
+  }
+}
+
+/**
  * Meminta izin pengguna dan mendaftarkan perangkat untuk menerima push notification.
  * Mengembalikan ExpoPushToken (string) jika berhasil, atau null jika gagal/ditolak.
  */
