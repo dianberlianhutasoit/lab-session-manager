@@ -15,6 +15,38 @@ export interface User {
 }
 
 /**
+ * SRS-07 Sprint 3: Representasi Data Lokasi Laboratorium (collection: labs)
+ */
+export interface Lab {
+  id: string;
+  name: string;
+  code?: string;
+  building: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  capacity?: number;
+  description?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Payload Form untuk Tambah / Edit Laboratorium
+ */
+export interface LabFormInput {
+  name: string;
+  code?: string;
+  building: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  capacity?: number;
+  description?: string;
+}
+
+/**
  * SRS-07: Representasi Data Kelas Praktikum (collection: classes)
  */
 export interface LabClass {

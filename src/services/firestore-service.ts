@@ -20,9 +20,11 @@ import {
   attendance as initialAttendance,
   leaveRequests as initialLeaveRequests,
   users as initialUsers,
+  labs as initialLabs,
 } from '@/data/dummy';
 import type {
   Attendance,
+  Lab,
   LabClass,
   LeaveRequest,
   LeaveStatus,
@@ -40,6 +42,7 @@ export const COLLECTIONS = {
   ATTENDANCE: 'attendance',
   LEAVE_REQUESTS: 'leave_requests',
   USERS: 'users',
+  LABS: 'labs',
 } as const;
 
 /**
@@ -193,6 +196,10 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
 
     for (const leave of initialLeaveRequests) {
       batch.set(doc(db, COLLECTIONS.LEAVE_REQUESTS, leave.id), stripUndefined(leave));
+    }
+
+    for (const lab of initialLabs) {
+      batch.set(doc(db, COLLECTIONS.LABS, lab.id), stripUndefined(lab));
     }
 
     await batch.commit();
@@ -446,4 +453,46 @@ export async function firestoreReviewLeaveRequest(
       reviewerNote: metadata.reviewerNote,
     })
   );
+}
+
+/**
+ * SRS-07 Sprint 3: Tambah data laboratorium baru ke Firestore (collection: labs)
+ */
+export async function firestoreCreateLab(lab: Lab): Promise<void> {
+  if (!db) return;
+  const now = new Date().toISOString();
+  await setDoc(
+    doc(db, COLLECTIONS.LABS, lab.id),
+    stripUndefined({
+      ...lab,
+      createdAt: lab.createdAt || now,
+      updatedAt: now,
+    })
+  );
+}
+
+/**
+ * SRS-07 Sprint 3: Perbarui data laboratorium di Firestore (collection: labs)
+ */
+export async function firestoreUpdateLab(
+  labId: string,
+  updates: Partial<Lab>
+): Promise<void> {
+  if (!db) return;
+  const now = new Date().toISOString();
+  await updateDoc(
+    doc(db, COLLECTIONS.LABS, labId),
+    stripUndefined({
+      ...updates,
+      updatedAt: now,
+    })
+  );
+}
+
+/**
+ * SRS-07 Sprint 3: Hapus laboratorium dari Firestore (collection: labs)
+ */
+export async function firestoreDeleteLab(labId: string): Promise<void> {
+  if (!db) return;
+  await deleteDoc(doc(db, COLLECTIONS.LABS, labId));
 }
