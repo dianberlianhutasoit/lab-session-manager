@@ -179,7 +179,7 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
               timeInterval,
               distanceInterval,
             },
-            (newPos) => {
+            (newPos: Location.LocationObject) => {
               if (isMountedRef.current) {
                 setLocation({
                   latitude: newPos.coords.latitude,
