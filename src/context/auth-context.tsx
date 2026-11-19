@@ -5,10 +5,11 @@ import {
   signOut,
   type User as FirebaseAuthUser,
 } from '@react-native-firebase/auth';
-import { doc, onSnapshot, runTransaction, setDoc } from '@react-native-firebase/firestore';
+import { doc, onSnapshot, runTransaction, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { firebaseAuth, firestore } from '@/services/firebase';
+import { registerForPushNotificationsAsync } from '@/services/notification-service';
 import type { Role, User } from '@/types';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'authenticated' | 'needsProfile' | 'profileError';
@@ -59,7 +60,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setError('Profil akun belum lengkap atau memiliki role yang tidak valid. Hubungi administrator.');
         return;
       }
-      setProfile({ id: snapshot.id, name: data.name, email: data.email, role: data.role });
+      setProfile({
+        id: snapshot.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        expoPushToken: typeof data.expoPushToken === 'string' ? data.expoPushToken : null,
+      });
       setStatus('authenticated');
       setError(null);
     }, (cause) => {
@@ -68,6 +75,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(toAuthMessage(cause));
     });
   }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser || status !== 'authenticated') return;
+    let isMounted = true;
+    void (async () => {
+      try {
+        const token = await registerForPushNotificationsAsync();
+        if (token && isMounted) {
+          await updateDoc(doc(firestore, 'users', authUser.uid), {
+            expoPushToken: token,
+          });
+        }
+      } catch (tokenErr) {
+        console.warn('[AuthContext] Gagal menyinkronkan token push:', tokenErr);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [authUser, status]);
 
   const register = useCallback(async (name: string, email: string, password: string) => {
     setError(null);
@@ -106,8 +133,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     setError(null);
+    if (authUser) {
+      try {
+        await updateDoc(doc(firestore, 'users', authUser.uid), {
+          expoPushToken: null,
+        });
+      } catch (tokenErr) {
+        console.warn('[AuthContext] Gagal membersihkan token push saat logout:', tokenErr);
+      }
+    }
     await signOut(firebaseAuth);
-  }, []);
+  }, [authUser]);
 
   const value = useMemo(() => ({ status, profile, error, register, completePractitionerProfile, login, logout }), [status, profile, error, register, completePractitionerProfile, login, logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

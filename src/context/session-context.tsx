@@ -39,6 +39,7 @@ import {
   firestoreUpdateLab,
   firestoreDeleteLab,
 } from '@/services/firestore-service';
+import { sendPushNotification } from '@/services/notification-service';
 import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
@@ -527,9 +528,34 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      // SRS-15: Pemicu push notification saat jadwal sesi diperbarui
+      const courseTitle = input.title.trim() || 'Praktikum';
+      const formattedTime = `${input.date.trim()} (${input.startTime.trim()} - ${input.endTime.trim()})`;
+      const targetTokens = users
+        .filter(
+          (u) =>
+            u.role === 'praktikan' &&
+            typeof u.expoPushToken === 'string' &&
+            u.expoPushToken.trim().length > 0
+        )
+        .map((u) => u.expoPushToken as string);
+
+      if (targetTokens.length > 0) {
+        void sendPushNotification({
+          to: targetTokens,
+          title: '📅 Jadwal Praktikum Diperbarui',
+          body: `Jadwal sesi ${courseTitle} telah diperbarui ke ${formattedTime} di ${input.room.trim()}.`,
+          data: {
+            screen: `/praktikan/${sessionId}`,
+            sessionId,
+            type: 'SCHEDULE_UPDATED',
+          },
+        });
+      }
+
       return true;
     },
-    [sessions, markRealtimeSync]
+    [sessions, users, markRealtimeSync]
   );
 
   // SRS-07: Delete Sesi & Jadwal Praktikum
@@ -622,6 +648,36 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isFirebaseConfigured) {
           await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
         }
+
+        // SRS-15: Pemicu push notification saat sesi praktikum dibuka
+        if (targetStatus === 'OPEN' && existing.status !== 'OPEN') {
+          const sessionSchedule = schedules.find((s) => s.id === existing.scheduleId);
+          const sessionClass = classes.find((c) => c.id === existing.classId);
+          const courseTitle = sessionClass?.title ?? sessionSchedule?.title ?? 'Praktikum';
+
+          const targetTokens = users
+            .filter(
+              (u) =>
+                u.role === 'praktikan' &&
+                typeof u.expoPushToken === 'string' &&
+                u.expoPushToken.trim().length > 0
+            )
+            .map((u) => u.expoPushToken as string);
+
+          if (targetTokens.length > 0) {
+            void sendPushNotification({
+              to: targetTokens,
+              title: '🟢 Sesi Praktikum Dibuka!',
+              body: `Sesi praktikum ${courseTitle} telah dibuka. Silakan lakukan presensi sekarang.`,
+              data: {
+                screen: `/praktikan/${sessionId}`,
+                sessionId,
+                type: 'SESSION_OPENED',
+              },
+            });
+          }
+        }
+
         return true;
       } catch (err) {
         console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
@@ -634,7 +690,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
       }
     },
-    [sessions, users, currentAssistantId, markRealtimeSync]
+    [sessions, schedules, classes, users, currentAssistantId, markRealtimeSync]
   );
 
   const openSession = useCallback(
@@ -843,6 +899,34 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isFirebaseConfigured) {
           await firestoreReviewLeaveRequest(requestId, decision, metadata);
         }
+
+        // SRS-16: Pemicu push notification saat keputusan izin (APPROVED / REJECTED)
+        const targetStudent = users.find((u) => u.id === existing.userId);
+        if (
+          targetStudent &&
+          typeof targetStudent.expoPushToken === 'string' &&
+          targetStudent.expoPushToken.trim().length > 0
+        ) {
+          const relatedSession = sessions.find((s) => s.id === existing.sessionId);
+          const relatedSchedule = schedules.find((sch) => sch.id === relatedSession?.scheduleId);
+          const courseTitle = relatedSchedule?.title ?? 'Praktikum';
+          const isApproved = decision === 'APPROVED';
+          const decisionText = isApproved ? 'disetujui' : 'ditolak';
+          const noteText = trimmedNote ? ` Catatan: "${trimmedNote}"` : '';
+
+          void sendPushNotification({
+            to: targetStudent.expoPushToken,
+            title: isApproved ? '✅ Pengajuan Izin Disetujui' : '❌ Pengajuan Izin Ditolak',
+            body: `Pengajuan izin Anda untuk praktikum ${courseTitle} telah ${decisionText}.${noteText}`,
+            data: {
+              screen: '/praktikan/izin',
+              requestId,
+              decision,
+              type: 'LEAVE_DECISION',
+            },
+          });
+        }
+
         return true;
       } catch (err) {
         console.warn('[SessionContext] Gagal memperbarui keputusan izin, rollback:', err);
@@ -854,7 +938,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setReviewingLeaveIds((prev) => prev.filter((id) => id !== requestId));
       }
     },
-    [leaveRequests, sessions, users, currentAssistantId, markRealtimeSync]
+    [leaveRequests, sessions, schedules, users, currentAssistantId, markRealtimeSync]
   );
 
   const getSessionLeaveRequests = useCallback(

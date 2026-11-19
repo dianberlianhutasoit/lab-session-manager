@@ -1,3 +1,10 @@
+try {
+  // Memastikan environment variable dari .env / .env.local dimuat ke process.env
+  require('@expo/env').load(process.cwd());
+} catch {
+  // Abaikan jika @expo/env sudah ditangani oleh Expo CLI
+}
+
 module.exports = ({ config }) => {
   const googleMapsApiKey =
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
