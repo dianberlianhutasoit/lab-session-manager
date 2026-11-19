@@ -38,6 +38,8 @@ import {
 import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
+  AttendanceLocationPayload,
+  AttendanceMethod,
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
@@ -56,6 +58,7 @@ import type {
   User,
 } from '@/types';
 import type { LabClassWithDetails } from '@/components/asisten/class-card';
+import { validateLabRadius, formatDistance } from '@/constants/lab-location';
 
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
@@ -102,8 +105,13 @@ interface SessionContextValue {
   ) => Promise<number>;
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
-  // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
-  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
+  // SRS-04 & SRS-05: Rekap Presensi Real-Time & Validasi Radius Lokasi / Anti Presensi Ganda
+  recordAttendance: (
+    sessionId: string,
+    userId: string,
+    recordedAt: string,
+    locationDetails?: AttendanceLocationPayload
+  ) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
     decision: Exclude<LeaveStatus, 'PENDING'>,
@@ -725,24 +733,70 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [statusLogs]
   );
 
-  // SRS-09: Mencatat presensi & memicu event pembaruan real-time
+  // SRS-04 & SRS-05: Mencatat presensi dengan validasi status sesi OPEN, validasi radius lab, dan cegah presensi ganda
   const recordAttendance = useCallback(
-    async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
+    async (
+      sessionId: string,
+      userId: string,
+      recordedAt: string,
+      locationDetails?: AttendanceLocationPayload
+    ): Promise<boolean> => {
+      // 1. Validasi keberadaan sesi & status sesi OPEN (SRS-04)
       const targetSession = sessions.find((s) => s.id === sessionId);
-      if (targetSession && targetSession.status !== 'OPEN') {
+      if (!targetSession) {
+        throw new Error('Sesi praktikum tidak ditemukan.');
+      }
+      if (targetSession.status !== 'OPEN') {
         throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
       }
 
+      // 2. Validasi cegah presensi ganda (SRS-05)
       const alreadyRecorded = attendanceRef.current.some(
         (record) => record.sessionId === sessionId && record.userId === userId
       );
-      if (alreadyRecorded) return false;
+      if (alreadyRecorded) {
+        throw new Error('Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.');
+      }
 
+      // 3. Validasi radius laboratorium di logika simpan (SRS-04)
+      let calculatedDistance = locationDetails?.distanceMeters;
+      if (
+        locationDetails &&
+        (locationDetails.method === 'LOCATION' || locationDetails.latitude !== undefined)
+      ) {
+        const schedule = schedules.find((sch) => sch.id === targetSession.scheduleId);
+        const roomName = schedule?.room;
+        const validation = validateLabRadius(
+          {
+            latitude: locationDetails.latitude,
+            longitude: locationDetails.longitude,
+          },
+          roomName
+        );
+
+        calculatedDistance = validation.distanceMeters;
+
+        if (!validation.isWithinRadius) {
+          throw new Error(
+            `Presensi ditolak: Anda berada di luar radius laboratorium (${formatDistance(
+              validation.distanceMeters
+            )} > ${validation.maxRadiusMeters} m).`
+          );
+        }
+      }
+
+      // 4. Buat record presensi dengan composite ID (SRS-05)
+      const compositeId = `attendance-${sessionId}-${userId}`;
       const newRecord: Attendance = {
-        id: `attendance-${sessionId}-${userId}`,
+        id: compositeId,
         sessionId,
         userId,
         recordedAt,
+        latitude: locationDetails?.latitude,
+        longitude: locationDetails?.longitude,
+        distanceMeters: calculatedDistance,
+        method: locationDetails?.method ?? (locationDetails?.latitude ? 'LOCATION' : 'MANUAL'),
+        qrCodeToken: locationDetails?.qrCodeToken,
       };
 
       const nextAttendance = [...attendanceRef.current, newRecord];
@@ -756,7 +810,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions, markRealtimeSync]
+    [sessions, schedules, markRealtimeSync]
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -900,6 +954,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             userName: student?.name ?? 'Praktikan Tidak Dikenal',
             userEmail: student?.email ?? '-',
             recordedAt: rec.recordedAt,
+            latitude: rec.latitude,
+            longitude: rec.longitude,
+            distanceMeters: rec.distanceMeters,
+            method: rec.method,
           };
         })
         .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
