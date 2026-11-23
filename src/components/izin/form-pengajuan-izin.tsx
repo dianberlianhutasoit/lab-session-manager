@@ -402,11 +402,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   submitButton: {
-    backgroundColor: '#0284C7',
+    backgroundColor: '#FBBF24',
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
     ...Platform.select({
       web: { cursor: 'pointer' },
     }),
@@ -415,8 +420,10 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#0F172A',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   loadingRow: {
     flexDirection: 'row',
