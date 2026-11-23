@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { router } from 'expo-router';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
@@ -29,7 +30,7 @@ import {
   StatusFilter,
 } from '@/components/asisten/session-filter-header';
 import { SessionDetailModal } from '@/components/asisten/session-detail-modal';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, MemphisColors, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   useSessionContext,
@@ -270,15 +271,23 @@ export default function HomeScreen() {
         },
       ]}>
       <View style={styles.container}>
-        {/* Header Title Section */}
-        <View style={styles.header}>
-          <View style={styles.headerBadgeRow}>
-            <View style={styles.badgeRole}>
-              <ThemedText type="smallBold" style={styles.badgeRoleText}>
-                PANEL ASISTEN LABORATORIUM
+        {/* 1. Top Profile Bar (sesuai Mockup Kiri) */}
+        <View style={styles.topProfileBar}>
+          <View style={styles.profileLeft}>
+            <View style={styles.avatarCircle}>
+              <ThemedText style={styles.avatarInitial}>
+                {profile?.name?.trim().charAt(0).toUpperCase() || 'A'}
               </ThemedText>
             </View>
+            <View style={styles.greetingCol}>
+              <ThemedText style={styles.greetingText}>Good Morning,</ThemedText>
+              <ThemedText style={styles.userName} numberOfLines={1}>
+                {profile?.name ?? 'Asisten Lab'}
+              </ThemedText>
+            </View>
+          </View>
 
+          <View style={styles.profileRight}>
             <View
               style={[
                 styles.dbBadge,
@@ -296,18 +305,159 @@ export default function HomeScreen() {
                   styles.dbBadgeText,
                   isFirestoreConnected ? styles.dbTextOnline : styles.dbTextLocal,
                 ]}>
-                {isFirestoreConnected ? 'Firestore Aktif' : 'Firestore Siap'}
+                {isFirestoreConnected ? 'Online' : 'Offline'}
               </ThemedText>
+            </View>
+
+            <Pressable
+              onPress={() => void logout()}
+              style={styles.logoutIconButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="log-out" size={17} color={MemphisColors.error} />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* 2. Hero Card: "Status Sesi Laboratorium Aktif" */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroLeft}>
+            <ThemedText style={styles.heroSubtitle}>STATUS OPERASIONAL LAB</ThemedText>
+            <ThemedText style={styles.heroDateNumber}>
+              {openSessions.length > 0 ? String(openSessions.length).padStart(2, '0') : '00'}
+            </ThemedText>
+            <ThemedText style={styles.heroDateSub}>
+              {openSessions.length > 0
+                ? `${openSessions.length} Sesi Aktif Sedang Buka`
+                : 'Tidak Ada Sesi Terbuka Saat Ini'}
+            </ThemedText>
+            <ThemedText style={styles.heroCourseTitle} numberOfLines={1}>
+              {openSessions.length > 0
+                ? openSessions[0].schedule?.title ?? 'Sesi Praktikum Aktif'
+                : 'Laboratorium Siap Digunakan'}
+            </ThemedText>
+            <View style={styles.heroBadgeRow}>
+              <View
+                style={[
+                  styles.heroStatusBadge,
+                  openSessions.length > 0
+                    ? styles.heroStatusOpen
+                    : styles.heroStatusClosed,
+                ]}
+              >
+                <ThemedText
+                  style={[
+                    styles.heroStatusText,
+                    openSessions.length > 0
+                      ? styles.heroStatusOpenText
+                      : styles.heroStatusClosedText,
+                  ]}
+                >
+                  {openSessions.length > 0 ? 'SESI TERBUKA' : 'STANDBY'}
+                </ThemedText>
+              </View>
             </View>
           </View>
 
-          <ThemedText type="title" style={styles.title}>
-            Manajemen Praktikum & Status Sesi
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Halo, {profile?.name ?? 'Asisten'}. Kelola kelas & jadwal praktikum, kontrol status pembukaan/penutupan sesi (OPEN/CLOSED), serta pantau kehadiran praktikan.
-          </ThemedText>
-          <Pressable onPress={() => void logout()}><ThemedText type="smallBold" style={{ color: '#4F8EF7' }}>Keluar</ThemedText></Pressable>
+          <View style={styles.heroRight}>
+            <View style={styles.heroGraphicCircle}>
+              <Ionicons name="hardware-chip-outline" size={42} color="#93C5FD" />
+            </View>
+          </View>
+        </View>
+
+        {/* 3. Overview Card: "Ringkasan Operasional" */}
+        <View style={styles.overviewCard}>
+          <View style={styles.overviewHeader}>
+            <ThemedText style={styles.overviewTitle}>Ringkasan Laboratorium</ThemedText>
+            <View style={styles.dropdownPill}>
+              <ThemedText style={styles.dropdownPillText}>Hari Ini ⌄</ThemedText>
+            </View>
+          </View>
+
+          <View style={styles.metricsRow}>
+            <View style={styles.metricCol}>
+              <ThemedText style={styles.metricLabel}>Total Sesi</ThemedText>
+              <View style={styles.metricValueRow}>
+                <ThemedText style={styles.metricNumber}>
+                  {allSessionsWithDetails.length}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>sesi</ThemedText>
+              </View>
+              <Feather name="calendar" size={14} color={MemphisColors.teal} />
+            </View>
+
+            <View style={styles.metricDivider} />
+
+            <View style={styles.metricCol}>
+              <ThemedText style={styles.metricLabel}>Sesi Buka</ThemedText>
+              <View style={styles.metricValueRow}>
+                <ThemedText style={styles.metricNumber}>{openSessions.length}</ThemedText>
+                <ThemedText style={styles.metricUnit}>aktif</ThemedText>
+              </View>
+              <Feather name="activity" size={14} color="#10B981" />
+            </View>
+
+            <View style={styles.metricDivider} />
+
+            <View style={styles.metricCol}>
+              <ThemedText style={styles.metricLabel}>Ruang Lab</ThemedText>
+              <View style={styles.metricValueRow}>
+                <ThemedText style={styles.metricNumber}>{labs.length}</ThemedText>
+                <ThemedText style={styles.metricUnit}>ruang</ThemedText>
+              </View>
+              <Feather name="map-pin" size={14} color="#F59E0B" />
+            </View>
+          </View>
+        </View>
+
+        {/* 4. Quick Access Shortcuts */}
+        <View style={styles.quickAccessSection}>
+          <ThemedText style={styles.quickAccessHeading}>Aksi Cepat Asisten</ThemedText>
+          <View style={styles.quickAccessRow}>
+            <Pressable
+              style={styles.quickActionItem}
+              onPress={() => handleOpenCreateSession()}
+            >
+              <View style={[styles.quickActionCircle, styles.quickActionCircleActive]}>
+                <Feather name="plus-circle" size={20} color={MemphisColors.teal} />
+              </View>
+              <ThemedText style={styles.quickActionLabel}>Buat Sesi</ThemedText>
+            </Pressable>
+
+            <Pressable
+              style={styles.quickActionItem}
+              onPress={handleOpenCreateClass}
+            >
+              <View style={styles.quickActionCircle}>
+                <Feather name="book-open" size={20} color={MemphisColors.slate} />
+              </View>
+              <ThemedText style={styles.quickActionLabel}>Buat Kelas</ThemedText>
+            </Pressable>
+
+            <Pressable
+              style={styles.quickActionItem}
+              onPress={() => {
+                setEditingLab(null);
+                setIsLabFormVisible(true);
+              }}
+            >
+              <View style={styles.quickActionCircle}>
+                <Feather name="grid" size={20} color={MemphisColors.slate} />
+              </View>
+              <ThemedText style={styles.quickActionLabel}>Tambah Lab</ThemedText>
+            </Pressable>
+
+            <Pressable
+              style={styles.quickActionItem}
+              onPress={() => router.push('/maps' as any)}
+            >
+              <View style={styles.quickActionCircle}>
+                <Feather name="map-pin" size={20} color={MemphisColors.slate} />
+              </View>
+              <ThemedText style={styles.quickActionLabel}>Peta Lab</ThemedText>
+            </Pressable>
+          </View>
         </View>
 
         {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas vs Lokasi Lab (SRS-07) */}
@@ -597,17 +747,265 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  badgeRole: {
-    backgroundColor: '#EEF2FF',
+  topProfileBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingTop: 4,
+  },
+  profileLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  avatarInitial: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: MemphisColors.teal,
+  },
+  greetingCol: {
+    justifyContent: 'center',
+  },
+  greetingText: {
+    fontSize: 13,
+    color: MemphisColors.muted,
+    fontWeight: '500',
+  },
+  userName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: MemphisColors.navy,
+  },
+  profileRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  logoutIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroCard: {
+    backgroundColor: MemphisColors.navy,
+    borderRadius: 24,
+    padding: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    shadowColor: MemphisColors.navy,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  heroLeft: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  heroSubtitle: {
+    color: '#93C5FD',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  heroDateNumber: {
+    color: '#FFFFFF',
+    fontSize: 38,
+    fontWeight: '800',
+    lineHeight: 44,
+  },
+  heroDateSub: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  heroCourseTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  heroStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+  },
+  heroStatusOpen: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  heroStatusOpenText: {
+    color: '#34D399',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  heroStatusClosed: {
+    backgroundColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  heroStatusClosedText: {
+    color: '#CBD5E1',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  heroStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  heroRight: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroGraphicCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overviewCard: {
+    backgroundColor: MemphisColors.mintSurface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    padding: 18,
+    marginBottom: 20,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  overviewTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: MemphisColors.navy,
+  },
+  dropdownPill: {
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
   },
-  badgeRoleText: {
-    color: '#4F46E5',
+  dropdownPillText: {
     fontSize: 11,
-    letterSpacing: 0.5,
+    fontWeight: '700',
+    color: MemphisColors.teal,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  metricCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  metricDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: '#DBEAFE',
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: MemphisColors.muted,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  metricValueRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+    marginBottom: 4,
+  },
+  metricNumber: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: MemphisColors.navy,
+  },
+  metricUnit: {
+    fontSize: 11,
+    color: MemphisColors.muted,
+    fontWeight: '600',
+  },
+  quickAccessSection: {
+    marginBottom: 20,
+  },
+  quickAccessHeading: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: MemphisColors.navy,
+    marginBottom: 14,
+  },
+  quickAccessRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quickActionItem: {
+    alignItems: 'center',
+    width: 72,
+  },
+  quickActionCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: MemphisColors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  quickActionCircleActive: {
+    backgroundColor: MemphisColors.blueActiveCircle,
+    borderColor: '#BFDBFE',
+  },
+  quickActionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: MemphisColors.slate,
+    textAlign: 'center',
   },
   dbBadge: {
     flexDirection: 'row',
@@ -648,21 +1046,23 @@ const styles = StyleSheet.create({
     color: '#0369A1',
   },
   title: {
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '800',
+    color: MemphisColors.navy,
   },
   subTabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 12,
+    backgroundColor: MemphisColors.surface,
+    borderRadius: 14,
     padding: 4,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: MemphisColors.cardBorder,
   },
   subTabButton: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 9,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
@@ -670,12 +1070,12 @@ const styles = StyleSheet.create({
     }),
   },
   subTabButtonActive: {
-    backgroundColor: '#0284C7',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    elevation: 2,
+    backgroundColor: MemphisColors.navy,
+    shadowColor: MemphisColors.navy,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   subTabText: {
     color: '#475569',
@@ -698,19 +1098,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   primaryAddButton: {
-    backgroundColor: '#0284C7',
-    paddingHorizontal: 14,
+    backgroundColor: MemphisColors.primary,
+    paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: MemphisColors.primaryPressed,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
     ...Platform.select({
       web: { cursor: 'pointer' },
     }),
   },
   primaryAddButtonText: {
-    color: '#FFFFFF',
+    color: MemphisColors.navy,
     fontSize: 13,
+    fontWeight: '700',
   },
   secondaryButton: {
     backgroundColor: '#F1F5F9',

@@ -23,4 +23,36 @@ export default function MainLayout() {
   return <AppTabs />;
 }
 
-const styles = StyleSheet.create({ state: { flex: 1, backgroundColor: '#12121A', alignItems: 'center', justifyContent: 'center', padding: 28, gap: 12 }, title: { color: '#F8F8F2', fontSize: 20, fontWeight: '700', textAlign: 'center' }, message: { color: '#A5ADC4', fontSize: 14, textAlign: 'center', lineHeight: 21 }, button: { marginTop: 12, backgroundColor: '#4F8EF7', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 }, buttonText: { color: '#fff', fontWeight: '700' } });
+const styles = StyleSheet.create({
+  state: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+    gap: 12,
+  },
+  title: {
+    color: '#0F172A',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  message: {
+    color: '#64748B',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  button: {
+    marginTop: 12,
+    backgroundColor: '#FBBF24',
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 26,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+});
