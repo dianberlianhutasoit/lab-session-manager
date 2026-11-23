@@ -188,7 +188,7 @@ export function useLocation(
               timeInterval,
               distanceInterval,
             },
-            (newPos) => {
+            (newPos: Location.LocationObject) => {
               if (isMountedRef.current) {
                 setLocation({
                   latitude: newPos.coords.latitude,
