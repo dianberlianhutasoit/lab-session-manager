@@ -1,18 +1,35 @@
-import type { Lab } from "@/types";
+import type { Coordinates, Lab, RadiusValidationResult } from "@/types";
 
-const EARTH_RADIUS_METERS = 6_371_000;
+export const EARTH_RADIUS_METERS = 6_371_000;
 
-function normalizeRoom(value: string): string {
+export function normalizeRoom(value: string): string {
   return value.trim().toLocaleLowerCase("id-ID");
 }
 
-export function findLabForRoom(labs: Lab[], room: string): Lab | undefined {
+export function findLabForRoom(labs: Lab[], room?: string | null): Lab | undefined {
+  if (!room || !room.trim()) return undefined;
   const normalizedRoom = normalizeRoom(room);
-  return labs.find(
+
+  // 1. Direct match: ID, name, code, building
+  const exact = labs.find(
     (lab) =>
+      lab.id === room.trim() ||
       normalizeRoom(lab.name) === normalizedRoom ||
+      (lab.code && normalizeRoom(lab.code) === normalizedRoom) ||
       normalizeRoom(lab.building) === normalizedRoom
   );
+  if (exact) return exact;
+
+  // 2. Fuzzy substring match (e.g. "Lab Komputer 1" matches "Laboratorium Komputer 1 (Lt. 2)")
+  return labs.find((lab) => {
+    const normName = normalizeRoom(lab.name);
+    const normCode = lab.code ? normalizeRoom(lab.code) : "";
+    return (
+      normalizedRoom.includes(normName) ||
+      normName.includes(normalizedRoom) ||
+      (normCode && (normalizedRoom.includes(normCode) || normCode.includes(normalizedRoom)))
+    );
+  });
 }
 
 export function distanceInMeters(
@@ -32,5 +49,32 @@ export function distanceInMeters(
       Math.cos(endLatitude) *
       Math.sin(longitudeDelta / 2) ** 2;
 
-  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  const distance = 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return Math.round(distance * 10) / 10;
+}
+
+export function validateAttendanceGeofence(
+  userCoords: Coordinates,
+  lab: Lab
+): RadiusValidationResult {
+  const distance = distanceInMeters(
+    userCoords.latitude,
+    userCoords.longitude,
+    lab.latitude,
+    lab.longitude
+  );
+
+  return {
+    isWithinRadius: distance <= lab.radius,
+    distanceMeters: distance,
+    maxRadiusMeters: lab.radius,
+    userCoordinates: userCoords,
+    labLocation: {
+      room: lab.name,
+      name: `${lab.name} (${lab.building})`,
+      latitude: lab.latitude,
+      longitude: lab.longitude,
+      radiusMeters: lab.radius,
+    },
+  };
 }

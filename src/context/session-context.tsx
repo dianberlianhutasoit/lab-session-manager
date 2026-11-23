@@ -6,12 +6,17 @@ import React, {
   useMemo,
   useRef,
   useState,
-} from "react";
+} from 'react';
 
 import type { LabClassWithDetails } from "@/components/asisten/class-card";
 import { isFirebaseConfigured } from "@/config/firebase";
-import { formatDistance, validateLabRadius } from "@/constants/lab-location";
+import {
+  formatDistance,
+  LAB_ROOM_LOCATIONS,
+  validateLabRadius,
+} from "@/constants/lab-location";
 import { useAuth } from "@/context/auth-context";
+import { sendPushNotification } from "@/services/notification-service";
 import {
   attendance as initialAttendance,
   classes as initialClasses,
@@ -22,7 +27,7 @@ import {
   sessions as initialSessions,
   statusLogs as initialStatusLogs,
   users as initialUsers,
-} from "@/data/dummy";
+} from '@/data/dummy';
 import {
   COLLECTIONS,
   firestoreBatchCloseSessions,
@@ -41,7 +46,7 @@ import {
   firestoreUpdateSessionStatus,
   seedInitialFirestoreDataIfEmpty,
   subscribeToCollection,
-} from "@/services/firestore-service";
+} from '@/services/firestore-service';
 import type {
   Attendance,
   AttendanceLocationPayload,
@@ -63,7 +68,8 @@ import type {
   SessionStatus,
   SessionStatusLog,
   User,
-} from "@/types";
+} from '@/types';
+import { distanceInMeters, findLabForRoom } from "@/utils/attendance-location";
 
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
@@ -92,50 +98,36 @@ interface SessionContextValue {
   // SRS-07: CRUD Kelas Praktikum (classes)
   createClass: (input: LabClassFormInput) => Promise<LabClass>;
   updateClass: (classId: string, input: LabClassFormInput) => Promise<boolean>;
-  deleteClass: (
-    classId: string,
-  ) => Promise<{ success: boolean; message?: string }>;
+  deleteClass: (classId: string) => Promise<{ success: boolean; message?: string }>;
   // SRS-07: CRUD Jadwal & Sesi Praktikum (schedules & sessions)
-  createSessionSchedule: (
-    input: SessionScheduleFormInput,
-  ) => Promise<SessionWithDetails>;
+  createSessionSchedule: (input: SessionScheduleFormInput) => Promise<SessionWithDetails>;
   updateSessionSchedule: (
     sessionId: string,
-    input: SessionScheduleFormInput,
+    input: SessionScheduleFormInput
   ) => Promise<boolean>;
   deleteSessionSchedule: (sessionId: string) => Promise<boolean>;
   // SRS-08: Kontrol Status Pembukaan/Penutupan Sesi (OPEN / CLOSED)
-  openSession: (
-    sessionId: string,
-    actorAssistantId?: string,
-  ) => Promise<boolean>;
-  closeSession: (
-    sessionId: string,
-    actorAssistantId?: string,
-  ) => Promise<boolean>;
-  toggleSessionStatus: (
-    sessionId: string,
-    actorAssistantId?: string,
-  ) => Promise<boolean>;
+  openSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  closeSession: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
+  toggleSessionStatus: (sessionId: string, actorAssistantId?: string) => Promise<boolean>;
   closeAllOpenSessions: (
     assistantIdFilter?: string,
-    actorAssistantId?: string,
+    actorAssistantId?: string
   ) => Promise<number>;
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
-  // SRS-04 & SRS-05: Rekap Presensi Real-Time & Validasi Radius Lokasi / Anti Presensi Ganda
   recordAttendance: (
     sessionId: string,
     userId: string,
     recordedAt: string,
-    locationDetails?: AttendanceLocationPayload,
+    location?: AttendanceLocationPayload
   ) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
-    decision: Exclude<LeaveStatus, "PENDING">,
+    decision: Exclude<LeaveStatus, 'PENDING'>,
     reviewerNote?: string,
-    actorAssistantId?: string,
+    actorAssistantId?: string
   ) => Promise<boolean>;
   getSessionLeaveRequests: (sessionId: string) => LeaveRequest[];
   // Helper queries
@@ -145,7 +137,6 @@ interface SessionContextValue {
   getAttendanceCount: (sessionId: string) => number;
   getClassesWithDetails: () => LabClassWithDetails[];
   getSessionsWithDetails: () => SessionWithDetails[];
-  // Rekap Presensi Praktikan
   getSessionAttendanceRecords: (sessionId: string) => AttendanceRecord[];
   getPractitioners: () => User[];
   // SRS-11 s/d SRS-13: Pengajuan Izin & Integrasi AI
@@ -160,10 +151,7 @@ interface SessionContextValue {
     aiAnalysis?: string;
   }) => Permission;
   getPermissionsByUser: (userId: string) => Permission[];
-  updatePermissionStatus: (
-    permissionId: string,
-    status: PermissionStatus,
-  ) => void;
+  updatePermissionStatus: (permissionId: string, status: PermissionStatus) => void;
   // SRS-07 & SRS-10 Sprint 3: Lokasi & Aktivitas Laboratorium
   labs: Lab[];
   createLab: (input: LabFormInput) => Promise<Lab>;
@@ -176,48 +164,41 @@ interface SessionContextValue {
   };
 }
 
-const SessionContext = createContext<SessionContextValue | undefined>(
-  undefined,
-);
+const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
+
   const [classes, setClasses] = useState<LabClass[]>(initialClasses);
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [schedules, setSchedules] = useState<Schedule[]>(initialSchedules);
-  const [statusLogs, setStatusLogs] =
-    useState<SessionStatusLog[]>(initialStatusLogs);
+  const [statusLogs, setStatusLogs] = useState<SessionStatusLog[]>(initialStatusLogs);
   const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
   const [labs, setLabs] = useState<Lab[]>(initialLabs);
-  const [leaveRequests, setLeaveRequests] =
-    useState<LeaveRequest[]>(initialLeaveRequests);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
   const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
-  const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(() =>
-    new Date().toISOString(),
+  const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(
+    () => new Date().toISOString()
   );
   const [realtimeEventCount, setRealtimeEventCount] = useState<number>(1);
-  const [isFirestoreConnected, setIsFirestoreConnected] =
-    useState<boolean>(false);
+  const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(() => isFirebaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
-  const [currentAssistantId, setCurrentAssistantId] =
-    useState<string>("user-asisten-001");
-  const [permissions, setPermissions] =
-    useState<Permission[]>(initialPermissions);
-  const [currentStudentId, setCurrentStudentId] =
-    useState<string>("user-praktikan-001");
+  const [currentAssistantId, setCurrentAssistantId] = useState<string>('user-asisten-001');
+  const [permissions, setPermissions] = useState<Permission[]>(initialPermissions);
+  const [currentStudentId, setCurrentStudentId] = useState<string>('user-praktikan-001');
 
   // Sinkronisasi dengan user profile yang login jika ada
   useEffect(() => {
     if (!profile) return;
     Promise.resolve().then(() => {
-      if (profile.role === "asisten") {
+      if (profile.role === 'asisten') {
         setCurrentAssistantId(profile.id);
-      } else if (profile.role === "praktikan") {
+      } else if (profile.role === 'praktikan') {
         setCurrentStudentId(profile.id);
       }
     });
@@ -246,7 +227,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((err) => {
-        console.warn("[SessionContext] Gagal inisialisasi Firestore:", err);
+        console.warn('[SessionContext] Gagal inisialisasi Firestore:', err);
         if (isMounted) {
           setError(err instanceof Error ? err.message : String(err));
         }
@@ -255,56 +236,44 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isMounted) setLoading(false);
       });
 
-    const unsubClasses = subscribeToCollection<LabClass>(
-      COLLECTIONS.CLASSES,
-      (items) => {
-        if (items.length > 0) setClasses(items);
-      },
-    );
+    const unsubClasses = subscribeToCollection<LabClass>(COLLECTIONS.CLASSES, (items) => {
+      if (items.length > 0) setClasses(items);
+    });
 
-    const unsubSchedules = subscribeToCollection<Schedule>(
-      COLLECTIONS.SCHEDULES,
-      (items) => {
-        if (items.length > 0) setSchedules(items);
-      },
-    );
+    const unsubSchedules = subscribeToCollection<Schedule>(COLLECTIONS.SCHEDULES, (items) => {
+      if (items.length > 0) setSchedules(items);
+    });
 
-    const unsubSessions = subscribeToCollection<Session>(
-      COLLECTIONS.SESSIONS,
-      (items) => {
-        if (items.length > 0) {
-          setSessions(items);
-          markRealtimeSync();
-        }
-      },
-    );
+    const unsubSessions = subscribeToCollection<Session>(COLLECTIONS.SESSIONS, (items) => {
+      if (items.length > 0) {
+        setSessions(items);
+        markRealtimeSync();
+      }
+    });
 
     const unsubLogs = subscribeToCollection<SessionStatusLog>(
       COLLECTIONS.STATUS_LOGS,
       (items) => {
         if (items.length > 0) {
           const sorted = [...items].sort((a, b) =>
-            b.changedAt.localeCompare(a.changedAt),
+            b.changedAt.localeCompare(a.changedAt)
           );
           setStatusLogs(sorted);
         }
-      },
+      }
     );
 
-    const unsubAttendance = subscribeToCollection<Attendance>(
-      COLLECTIONS.ATTENDANCE,
-      (items) => {
-        setAttendance(items);
-        markRealtimeSync();
-      },
-    );
+    const unsubAttendance = subscribeToCollection<Attendance>(COLLECTIONS.ATTENDANCE, (items) => {
+      setAttendance(items);
+      markRealtimeSync();
+    });
 
     const unsubLeaves = subscribeToCollection<LeaveRequest>(
       COLLECTIONS.LEAVE_REQUESTS,
       (items) => {
         if (items.length > 0) {
           const sorted = [...items].sort((a, b) =>
-            b.submittedAt.localeCompare(a.submittedAt),
+            b.submittedAt.localeCompare(a.submittedAt)
           );
           setLeaveRequests(sorted);
 
@@ -326,15 +295,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
           markRealtimeSync();
         }
-      },
+      }
     );
 
-    const unsubUsers = subscribeToCollection<User>(
-      COLLECTIONS.USERS,
-      (items) => {
-        if (items.length > 0) setUsers(items);
-      },
-    );
+    const unsubUsers = subscribeToCollection<User>(COLLECTIONS.USERS, (items) => {
+      if (items.length > 0) setUsers(items);
+    });
 
     const unsubLabs = subscribeToCollection<Lab>(COLLECTIONS.LABS, (items) => {
       if (items.length > 0) {
@@ -357,32 +323,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [markRealtimeSync]);
 
   // SRS-07: Create Kelas Praktikum
-  const createClass = useCallback(
-    async (input: LabClassFormInput): Promise<LabClass> => {
-      const now = new Date().toISOString();
-      const newClass: LabClass = {
-        id: `class-${Date.now()}`,
-        courseCode: input.courseCode.trim().toUpperCase(),
-        title: input.title.trim(),
-        className: input.className.trim(),
-        room: input.room.trim(),
-        assistantId: input.assistantId,
-        semester: input.semester?.trim() || "Ganjil 2026/2027",
-        capacity: input.capacity ?? 30,
-        createdAt: now,
-        updatedAt: now,
-      };
+  const createClass = useCallback(async (input: LabClassFormInput): Promise<LabClass> => {
+    const now = new Date().toISOString();
+    const newClass: LabClass = {
+      id: `class-${Date.now()}`,
+      courseCode: input.courseCode.trim().toUpperCase(),
+      title: input.title.trim(),
+      className: input.className.trim(),
+      room: input.room.trim(),
+      assistantId: input.assistantId,
+      semester: input.semester?.trim() || 'Ganjil 2026/2027',
+      capacity: input.capacity ?? 30,
+      createdAt: now,
+      updatedAt: now,
+    };
 
-      setClasses((prev) => [...prev, newClass]);
+    setClasses((prev) => [...prev, newClass]);
 
-      if (isFirebaseConfigured) {
-        await firestoreCreateClass(newClass);
-      }
+    if (isFirebaseConfigured) {
+      await firestoreCreateClass(newClass);
+    }
 
-      return newClass;
-    },
-    [],
-  );
+    return newClass;
+  }, []);
 
   // SRS-07: Update Kelas Praktikum & sinkronkan ke jadwal terkait
   const updateClass = useCallback(
@@ -403,9 +366,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       };
 
       setClasses((prev) =>
-        prev.map((cls) =>
-          cls.id === classId ? { ...cls, ...updatedFields } : cls,
-        ),
+        prev.map((cls) => (cls.id === classId ? { ...cls, ...updatedFields } : cls))
       );
 
       const relatedScheduleIds: string[] = [];
@@ -413,9 +374,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((sch) => {
           const isRelated =
             sch.classId === classId ||
-            sessions.some(
-              (s) => s.scheduleId === sch.id && s.classId === classId,
-            );
+            sessions.some((s) => s.scheduleId === sch.id && s.classId === classId);
           if (isRelated) {
             relatedScheduleIds.push(sch.id);
             return {
@@ -426,7 +385,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             };
           }
           return sch;
-        }),
+        })
       );
 
       if (isFirebaseConfigured) {
@@ -435,17 +394,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [classes, sessions],
+    [classes, sessions]
   );
 
   // SRS-07: Delete Kelas Praktikum (DITOLAK jika kelas masih memiliki sesi)
   const deleteClass = useCallback(
-    async (
-      classId: string,
-    ): Promise<{ success: boolean; message?: string }> => {
+    async (classId: string): Promise<{ success: boolean; message?: string }> => {
       const targetClass = classes.find((c) => c.id === classId);
       if (!targetClass) {
-        return { success: false, message: "Data kelas tidak ditemukan." };
+        return { success: false, message: 'Data kelas tidak ditemukan.' };
       }
 
       const associatedSessions = sessions.filter((sess) => {
@@ -469,7 +426,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return { success: true };
     },
-    [classes, sessions, schedules],
+    [classes, sessions, schedules]
   );
 
   // SRS-07: Create Sesi & Jadwal Praktikum
@@ -479,7 +436,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const scheduleId = `schedule-${timestamp}`;
       const sessionId = `session-${timestamp}`;
-      const initialStatus = input.status ?? "CLOSED";
+      const initialStatus = input.status ?? 'CLOSED';
 
       const newSchedule: Schedule = {
         id: scheduleId,
@@ -501,7 +458,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         scheduleId,
         assistantId: input.assistantId,
         status: initialStatus,
-        openedAt: initialStatus === "OPEN" ? now : undefined,
+        openedAt: initialStatus === 'OPEN' ? now : undefined,
         lastUpdatedBy: input.assistantId,
         createdAt: now,
         updatedAt: now,
@@ -523,15 +480,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         attendanceCount: 0,
       };
     },
-    [users, markRealtimeSync],
+    [users, markRealtimeSync]
   );
 
   // SRS-07: Update Sesi & Jadwal Praktikum
   const updateSessionSchedule = useCallback(
-    async (
-      sessionId: string,
-      input: SessionScheduleFormInput,
-    ): Promise<boolean> => {
+    async (sessionId: string, input: SessionScheduleFormInput): Promise<boolean> => {
       const existingSession = sessions.find((s) => s.id === sessionId);
       if (!existingSession) return false;
 
@@ -544,11 +498,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         assistantId: input.assistantId,
         status: nextStatus,
         openedAt:
-          nextStatus === "OPEN" && existingSession.status !== "OPEN"
+          nextStatus === 'OPEN' && existingSession.status !== 'OPEN'
             ? now
             : existingSession.openedAt,
         closedAt:
-          nextStatus === "CLOSED" && existingSession.status === "OPEN"
+          nextStatus === 'CLOSED' && existingSession.status === 'OPEN'
             ? now
             : existingSession.closedAt,
         lastUpdatedBy: input.assistantId,
@@ -569,13 +523,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       };
 
       setSessions((prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, ...sessionUpdates } : s)),
+        prev.map((s) => (s.id === sessionId ? { ...s, ...sessionUpdates } : s))
       );
 
       setSchedules((prev) =>
-        prev.map((sch) =>
-          sch.id === scheduleId ? { ...sch, ...scheduleUpdates } : sch,
-        ),
+        prev.map((sch) => (sch.id === scheduleId ? { ...sch, ...scheduleUpdates } : sch))
       );
       markRealtimeSync();
 
@@ -584,13 +536,57 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           sessionId,
           scheduleId,
           sessionUpdates,
-          scheduleUpdates,
+          scheduleUpdates
         );
+      }
+
+      // SRS-15: Notifikasi broadcast ke seluruh praktikan saat jadwal diubah
+      const practitionerTokens = users
+        .filter((u) => u.role === "praktikan" && u.expoPushToken)
+        .map((u) => u.expoPushToken as string);
+
+      if (practitionerTokens.length > 0) {
+        void sendPushNotification({
+          to: practitionerTokens,
+          title: "📅 Jadwal Praktikum Diperbarui",
+          body: `Jadwal ${input.title.trim()} (${input.room.trim()}) telah diperbarui ke ${input.date.trim()} pukul ${input.startTime.trim()}-${input.endTime.trim()} WIB.`,
+          data: { screen: "/praktikan", sessionId },
+        }).catch((notifErr) => {
+          console.warn(
+            "[SessionContext] Gagal mengirim push notifikasi pembaruan jadwal:",
+            notifErr,
+          );
+        });
+      }
+
+      // SRS-15: Pemicu push notification saat jadwal sesi diperbarui
+      const courseTitle = input.title.trim() || 'Praktikum';
+      const formattedTime = `${input.date.trim()} (${input.startTime.trim()} - ${input.endTime.trim()})`;
+      const targetTokens = users
+        .filter(
+          (u) =>
+            u.role === 'praktikan' &&
+            typeof u.expoPushToken === 'string' &&
+            u.expoPushToken.trim().length > 0
+        )
+        .map((u) => u.expoPushToken as string);
+
+      if (targetTokens.length > 0) {
+        void sendPushNotification({
+          to: targetTokens,
+          title: '📅 Jadwal Praktikum Diperbarui',
+          body: `Jadwal sesi ${courseTitle} telah diperbarui ke ${formattedTime} di ${input.room.trim()}.`,
+          data: {
+            screen: `/praktikan/${sessionId}`,
+            sessionId,
+            type: 'SCHEDULE_UPDATED',
+          },
+        });
       }
 
       return true;
     },
-    [sessions, markRealtimeSync],
+    [sessions, users, markRealtimeSync],
   );
 
   // SRS-07: Delete Sesi & Jadwal Praktikum
@@ -608,22 +604,20 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setSchedules((prev) => prev.filter((sch) => sch.id !== scheduleId));
       setAttendance((prev) => prev.filter((a) => a.sessionId !== sessionId));
       setLeaveRequests((prev) => prev.filter((l) => l.sessionId !== sessionId));
-      setStatusLogs((prev) =>
-        prev.filter((log) => log.sessionId !== sessionId),
-      );
+      setStatusLogs((prev) => prev.filter((log) => log.sessionId !== sessionId));
       markRealtimeSync();
 
       if (isFirebaseConfigured) {
         await firestoreDeleteSessionAndSchedule(
           sessionId,
           scheduleId,
-          relatedAttendanceIds,
+          relatedAttendanceIds
         );
       }
 
       return true;
     },
-    [sessions, attendance, markRealtimeSync],
+    [sessions, attendance, markRealtimeSync]
   );
 
   // SRS-08: Fungsi inti transisi status sesi dengan audit log, loading state & rollback
@@ -631,14 +625,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     async (
       sessionId: string,
       targetStatus: SessionStatus,
-      actorAssistantId?: string,
+      actorAssistantId?: string
     ): Promise<boolean> => {
       const existing = sessions.find((s) => s.id === sessionId);
       if (!existing || existing.status === targetStatus) return false;
 
       const now = new Date().toISOString();
       const effectiveActorId =
-        actorAssistantId && actorAssistantId !== "ALL"
+        actorAssistantId && actorAssistantId !== 'ALL'
           ? actorAssistantId
           : existing.assistantId || currentAssistantId;
 
@@ -646,8 +640,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const isSubstitute = effectiveActorId !== existing.assistantId;
 
       const metadata = {
-        openedAt: targetStatus === "OPEN" ? now : existing.openedAt,
-        closedAt: targetStatus === "CLOSED" ? now : existing.closedAt,
+        openedAt: targetStatus === 'OPEN' ? now : existing.openedAt,
+        closedAt: targetStatus === 'CLOSED' ? now : existing.closedAt,
         lastUpdatedBy: effectiveActorId,
       };
 
@@ -657,51 +651,92 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         previousStatus: existing.status,
         newStatus: targetStatus,
         changedBy: effectiveActorId,
-        changedByName: actorUser?.name ?? "Asisten Lab",
+        changedByName: actorUser?.name ?? 'Asisten Lab',
         isSubstitute,
         changedAt: now,
       };
 
       setUpdatingSessionIds((prev) =>
-        prev.includes(sessionId) ? prev : [...prev, sessionId],
+        prev.includes(sessionId) ? prev : [...prev, sessionId]
       );
 
       setSessions((prev) =>
         prev.map((s) =>
           s.id === sessionId
             ? {
-                ...s,
-                status: targetStatus,
-                ...metadata,
-                updatedAt: now,
-              }
-            : s,
-        ),
+              ...s,
+              status: targetStatus,
+              ...metadata,
+              updatedAt: now,
+            }
+            : s
+        )
       );
       setStatusLogs((prev) => [newLog, ...prev]);
       markRealtimeSync();
 
-      setError(null);
       try {
         if (isFirebaseConfigured) {
-          await firestoreUpdateSessionStatus(
-            sessionId,
-            targetStatus,
-            metadata,
-            newLog,
-          );
+          await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
         }
+
+        // SRS-15: Push notification broadcast ke seluruh praktikan saat sesi dibuka
+        if (targetStatus === "OPEN") {
+          const schedule = schedules.find((sch) => sch.id === existing.scheduleId);
+          const practitionerTokens = users
+            .filter((u) => u.role === "praktikan" && u.expoPushToken)
+            .map((u) => u.expoPushToken as string);
+
+          if (practitionerTokens.length > 0) {
+            void sendPushNotification({
+              to: practitionerTokens,
+              title: "🟢 Sesi Praktikum Dibuka!",
+              body: `Sesi ${schedule?.title ?? "Praktikum"} (${schedule?.room ?? "Lab"}) telah dibuka. Silakan lakukan presensi sekarang.`,
+              data: { screen: `/praktikan/${sessionId}`, sessionId },
+            }).catch((notifErr) => {
+              console.warn(
+                "[SessionContext] Gagal mengirim push broadcast sesi dibuka:",
+                notifErr,
+              );
+            });
+          }
+        }
+
+
+        // SRS-15: Pemicu push notification saat sesi praktikum dibuka
+        if (targetStatus === 'OPEN' && existing.status !== 'OPEN') {
+          const sessionSchedule = schedules.find((s) => s.id === existing.scheduleId);
+          const sessionClass = classes.find((c) => c.id === existing.classId);
+          const courseTitle = sessionClass?.title ?? sessionSchedule?.title ?? 'Praktikum';
+
+          const targetTokens = users
+            .filter(
+              (u) =>
+                u.role === 'praktikan' &&
+                typeof u.expoPushToken === 'string' &&
+                u.expoPushToken.trim().length > 0
+            )
+            .map((u) => u.expoPushToken as string);
+
+          if (targetTokens.length > 0) {
+            void sendPushNotification({
+              to: targetTokens,
+              title: '🟢 Sesi Praktikum Dibuka!',
+              body: `Sesi praktikum ${courseTitle} telah dibuka. Silakan lakukan presensi sekarang.`,
+              data: {
+                screen: `/praktikan/${sessionId}`,
+                sessionId,
+                type: 'SESSION_OPENED',
+              },
+            });
+          }
+        }
+
         return true;
       } catch (err) {
-        console.warn(
-          "[SessionContext] Gagal memperbarui status sesi, rollback:",
-          err,
-        );
-        setError(
-          err instanceof Error ? err.message : "Status sesi gagal diperbarui.",
-        );
+        console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
         setSessions((prev) =>
-          prev.map((s) => (s.id === sessionId ? existing : s)),
+          prev.map((s) => (s.id === sessionId ? existing : s))
         );
         setStatusLogs((prev) => prev.filter((l) => l.id !== newLog.id));
         return false;
@@ -709,42 +744,41 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
       }
     },
-    [sessions, users, currentAssistantId, markRealtimeSync],
+    [sessions, schedules, classes, users, currentAssistantId, markRealtimeSync],
   );
 
   const openSession = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
-      return changeSessionStatus(sessionId, "OPEN", actorAssistantId);
+      return changeSessionStatus(sessionId, 'OPEN', actorAssistantId);
     },
-    [changeSessionStatus],
+    [changeSessionStatus]
   );
 
   const closeSession = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
-      return changeSessionStatus(sessionId, "CLOSED", actorAssistantId);
+      return changeSessionStatus(sessionId, 'CLOSED', actorAssistantId);
     },
-    [changeSessionStatus],
+    [changeSessionStatus]
   );
 
   const toggleSessionStatus = useCallback(
     async (sessionId: string, actorAssistantId?: string): Promise<boolean> => {
       const target = sessions.find((s) => s.id === sessionId);
       if (!target) return false;
-      const nextStatus: SessionStatus =
-        target.status === "OPEN" ? "CLOSED" : "OPEN";
+      const nextStatus: SessionStatus = target.status === 'OPEN' ? 'CLOSED' : 'OPEN';
       return changeSessionStatus(sessionId, nextStatus, actorAssistantId);
     },
-    [sessions, changeSessionStatus],
+    [sessions, changeSessionStatus]
   );
 
   const closeAllOpenSessions = useCallback(
     async (
       assistantIdFilter?: string,
-      actorAssistantId?: string,
+      actorAssistantId?: string
     ): Promise<number> => {
       const openTargets = sessions.filter((s) => {
-        if (s.status !== "OPEN") return false;
-        if (assistantIdFilter && assistantIdFilter !== "ALL") {
+        if (s.status !== 'OPEN') return false;
+        if (assistantIdFilter && assistantIdFilter !== 'ALL') {
           return s.assistantId === assistantIdFilter;
         }
         return true;
@@ -755,7 +789,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const targetIds = openTargets.map((s) => s.id);
       const effectiveActorId =
-        actorAssistantId && actorAssistantId !== "ALL"
+        actorAssistantId && actorAssistantId !== 'ALL'
           ? actorAssistantId
           : currentAssistantId;
       const actorUser = users.find((u) => u.id === effectiveActorId);
@@ -763,31 +797,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const newLogs: SessionStatusLog[] = openTargets.map((s, idx) => ({
         id: `log-${s.id}-${Date.now()}-${idx}`,
         sessionId: s.id,
-        previousStatus: "OPEN",
-        newStatus: "CLOSED",
+        previousStatus: 'OPEN',
+        newStatus: 'CLOSED',
         changedBy: effectiveActorId,
-        changedByName: actorUser?.name ?? "Asisten Lab",
+        changedByName: actorUser?.name ?? 'Asisten Lab',
         isSubstitute: effectiveActorId !== s.assistantId,
         changedAt: now,
       }));
 
-      setUpdatingSessionIds((prev) =>
-        Array.from(new Set([...prev, ...targetIds])),
-      );
+      setUpdatingSessionIds((prev) => Array.from(new Set([...prev, ...targetIds])));
 
       const previousSessionsSnapshot = sessions;
       setSessions((prev) =>
         prev.map((s) =>
           targetIds.includes(s.id)
             ? {
-                ...s,
-                status: "CLOSED" as SessionStatus,
-                closedAt: now,
-                lastUpdatedBy: effectiveActorId,
-                updatedAt: now,
-              }
-            : s,
-        ),
+              ...s,
+              status: 'CLOSED' as SessionStatus,
+              closedAt: now,
+              lastUpdatedBy: effectiveActorId,
+              updatedAt: now,
+            }
+            : s
+        )
       );
       setStatusLogs((prev) => [...newLogs, ...prev]);
       markRealtimeSync();
@@ -798,145 +830,163 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             targetIds,
             now,
             effectiveActorId,
-            newLogs,
+            newLogs
           );
         }
         return targetIds.length;
       } catch (err) {
-        console.warn(
-          "[SessionContext] Gagal menutup semua sesi, rollback:",
-          err,
-        );
+        console.warn('[SessionContext] Gagal menutup semua sesi, rollback:', err);
         setSessions(previousSessionsSnapshot);
         const logIds = new Set(newLogs.map((l) => l.id));
         setStatusLogs((prev) => prev.filter((l) => !logIds.has(l.id)));
         return 0;
       } finally {
         setUpdatingSessionIds((prev) =>
-          prev.filter((id) => !targetIds.includes(id)),
+          prev.filter((id) => !targetIds.includes(id))
         );
       }
     },
-    [sessions, users, currentAssistantId, markRealtimeSync],
+    [sessions, users, currentAssistantId, markRealtimeSync]
   );
 
   const isSessionUpdating = useCallback(
     (sessionId: string) => updatingSessionIds.includes(sessionId),
-    [updatingSessionIds],
+    [updatingSessionIds]
   );
 
   const getSessionStatusLogs = useCallback(
     (sessionId: string): SessionStatusLog[] =>
       statusLogs.filter((log) => log.sessionId === sessionId),
-    [statusLogs],
+    [statusLogs]
   );
 
-  // SRS-04 & SRS-05: Mencatat presensi dengan validasi status sesi OPEN, validasi radius lab, dan cegah presensi ganda
+  // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
     async (
       sessionId: string,
       userId: string,
       recordedAt: string,
-      locationDetails?: AttendanceLocationPayload,
+      location?: AttendanceLocationPayload
     ): Promise<boolean> => {
-      // 1. Validasi keberadaan sesi & status sesi OPEN (SRS-04)
       const targetSession = sessions.find((s) => s.id === sessionId);
       if (!targetSession) {
-        throw new Error("Sesi praktikum tidak ditemukan.");
+        throw new Error('Sesi praktikum tidak ditemukan.');
       }
-      if (targetSession.status !== "OPEN") {
-        throw new Error(
-          "Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.",
-        );
+      if (targetSession.status !== 'OPEN') {
+        throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
       }
 
-      // 2. Validasi cegah presensi ganda (SRS-05)
       const alreadyRecorded = attendanceRef.current.some(
-        (record) => record.sessionId === sessionId && record.userId === userId,
+        (record) => record.sessionId === sessionId && record.userId === userId
       );
-      if (alreadyRecorded) {
-        throw new Error(
-          "Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.",
-        );
-      }
+      if (alreadyRecorded) return false;
 
-      // 3. Validasi radius laboratorium di logika simpan (SRS-04)
-      let calculatedDistance = locationDetails?.distanceMeters;
-      if (
-        locationDetails &&
-        (locationDetails.method === "LOCATION" ||
-          locationDetails.latitude !== undefined)
-      ) {
-        const schedule = schedules.find(
-          (sch) => sch.id === targetSession.scheduleId,
-        );
+      let attendanceLocation: Pick<Attendance, 'latitude' | 'longitude' | 'distanceMeters' | 'method'> = {
+        method: 'MANUAL',
+      };
+      if (location) {
+        const schedule = schedules.find((item) => item.id === targetSession.scheduleId);
         const roomName = schedule?.room;
-        const validation = validateLabRadius(
-          {
-            latitude: locationDetails.latitude,
-            longitude: locationDetails.longitude,
-          },
-          roomName,
-        );
+        const matchingLab = findLabForRoom(labs, roomName);
 
-        calculatedDistance = validation.distanceMeters;
+        let calculatedDistance: number;
 
-        if (!validation.isWithinRadius) {
+        if (
+          matchingLab &&
+          location.latitude !== undefined &&
+          location.longitude !== undefined
+        ) {
+          calculatedDistance =
+            Math.round(
+              distanceInMeters(
+                location.latitude,
+                location.longitude,
+                matchingLab.latitude,
+                matchingLab.longitude,
+              ) * 10,
+            ) / 10;
+
+          if (calculatedDistance > matchingLab.radius) {
+            throw new Error(
+              `Presensi ditolak: Anda berada di luar radius laboratorium "${matchingLab.name}" (${formatDistance(
+                calculatedDistance,
+              )} > ${matchingLab.radius} m).`,
+            );
+          }
+        } else if (
+          roomName &&
+          (roomName.trim() in LAB_ROOM_LOCATIONS ||
+            Object.values(LAB_ROOM_LOCATIONS).some((l) =>
+              roomName.toLowerCase().includes(l.room.toLowerCase()),
+            ))
+        ) {
+          const validation = validateLabRadius(
+            {
+              latitude: location.latitude,
+              longitude: location.longitude,
+            },
+            roomName,
+          );
+
+          calculatedDistance = validation.distanceMeters;
+
+          if (!validation.isWithinRadius) {
+            throw new Error(
+              `Presensi ditolak: Anda berada di luar radius laboratorium (${formatDistance(
+                validation.distanceMeters,
+              )} > ${validation.maxRadiusMeters} m).`,
+            );
+          }
+        } else {
           throw new Error(
-            `Presensi ditolak: Anda berada di luar radius laboratorium (${formatDistance(
-              validation.distanceMeters,
-            )} > ${validation.maxRadiusMeters} m).`,
+            `Presensi ditolak: Ruangan laboratorium "${roomName || "Tidak ditentukan"}" belum terdaftar pada master data. Hubungi asisten praktikum.`,
           );
         }
+        attendanceLocation = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          distanceMeters: calculatedDistance,
+          method: 'LOCATION',
+        };
       }
 
-      // 4. Buat record presensi dengan composite ID (SRS-05)
-      const compositeId = `attendance-${sessionId}-${userId}`;
       const newRecord: Attendance = {
-        id: compositeId,
+        id: `attendance-${sessionId}-${userId}`,
         sessionId,
         userId,
         recordedAt,
-        latitude: locationDetails?.latitude,
-        longitude: locationDetails?.longitude,
-        distanceMeters: calculatedDistance,
-        method:
-          locationDetails?.method ??
-          (locationDetails?.latitude ? "LOCATION" : "MANUAL"),
-        qrCodeToken: locationDetails?.qrCodeToken,
+        ...attendanceLocation,
       };
+
+      if (isFirebaseConfigured) {
+        await firestoreRecordAttendance(newRecord);
+      }
 
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
       markRealtimeSync();
 
-      if (isFirebaseConfigured) {
-        await firestoreRecordAttendance(newRecord);
-      }
-
       return true;
     },
-    [sessions, schedules, markRealtimeSync],
+    [sessions, schedules, labs, markRealtimeSync],
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
   const reviewLeaveRequest = useCallback(
     async (
       requestId: string,
-      decision: Exclude<LeaveStatus, "PENDING">,
+      decision: Exclude<LeaveStatus, 'PENDING'>,
       reviewerNote?: string,
-      actorAssistantId?: string,
+      actorAssistantId?: string
     ): Promise<boolean> => {
       const existing = leaveRequests.find((l) => l.id === requestId);
       if (!existing) return false;
 
       const now = new Date().toISOString();
-      const sessionOfRequest = sessions.find(
-        (s) => s.id === existing.sessionId,
-      );
+      const sessionOfRequest = sessions.find((s) => s.id === existing.sessionId);
       const effectiveActorId =
-        actorAssistantId && actorAssistantId !== "ALL"
+        actorAssistantId && actorAssistantId !== 'ALL'
           ? actorAssistantId
           : sessionOfRequest?.assistantId || currentAssistantId;
 
@@ -945,35 +995,35 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       const metadata = {
         reviewedBy: effectiveActorId,
-        reviewedByName: reviewerUser?.name ?? "Asisten Lab",
+        reviewedByName: reviewerUser?.name ?? 'Asisten Lab',
         reviewedAt: now,
         reviewerNote: trimmedNote,
       };
 
       setReviewingLeaveIds((prev) =>
-        prev.includes(requestId) ? prev : [...prev, requestId],
+        prev.includes(requestId) ? prev : [...prev, requestId]
       );
 
       setLeaveRequests((prev) =>
         prev.map((item) =>
           item.id === requestId
             ? {
-                ...item,
-                status: decision,
-                ...metadata,
-              }
-            : item,
-        ),
+              ...item,
+              status: decision,
+              ...metadata,
+            }
+            : item
+        )
       );
       setPermissions((prev) =>
         prev.map((item) =>
           item.id === requestId
             ? {
-                ...item,
-                status: decision,
-              }
-            : item,
-        ),
+              ...item,
+              status: decision,
+            }
+            : item
+        )
       );
       markRealtimeSync();
 
@@ -981,48 +1031,92 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isFirebaseConfigured) {
           await firestoreReviewLeaveRequest(requestId, decision, metadata);
         }
+
+        // SRS-16: Notifikasi ke praktikan bersangkutan saat izin disetujui / ditolak
+        const student = users.find((u) => u.id === existing.userId);
+        if (student?.expoPushToken) {
+          const isApproved = decision === "APPROVED";
+          void sendPushNotification({
+            to: student.expoPushToken,
+            title: isApproved
+              ? "✅ Izin Praktikum Disetujui"
+              : "❌ Izin Praktikum Ditolak",
+            body: `Permohonan izin Anda telah ${isApproved ? "disetujui" : "ditolak"} oleh ${metadata.reviewedByName}.${trimmedNote ? ` Catatan: "${trimmedNote}"` : ""}`,
+            data: { screen: "/praktikan/izin", requestId },
+          }).catch((notifErr) => {
+            console.warn(
+              "[SessionContext] Gagal mengirim push notifikasi keputusan izin:",
+              notifErr,
+            );
+          });
+        }
+
+
+        // SRS-16: Pemicu push notification saat keputusan izin (APPROVED / REJECTED)
+        const targetStudent = users.find((u) => u.id === existing.userId);
+        if (
+          targetStudent &&
+          typeof targetStudent.expoPushToken === 'string' &&
+          targetStudent.expoPushToken.trim().length > 0
+        ) {
+          const relatedSession = sessions.find((s) => s.id === existing.sessionId);
+          const relatedSchedule = schedules.find((sch) => sch.id === relatedSession?.scheduleId);
+          const courseTitle = relatedSchedule?.title ?? 'Praktikum';
+          const isApproved = decision === 'APPROVED';
+          const decisionText = isApproved ? 'disetujui' : 'ditolak';
+          const noteText = trimmedNote ? ` Catatan: "${trimmedNote}"` : '';
+
+          void sendPushNotification({
+            to: targetStudent.expoPushToken,
+            title: isApproved ? '✅ Pengajuan Izin Disetujui' : '❌ Pengajuan Izin Ditolak',
+            body: `Pengajuan izin Anda untuk praktikum ${courseTitle} telah ${decisionText}.${noteText}`,
+            data: {
+              screen: '/praktikan/izin',
+              requestId,
+              decision,
+              type: 'LEAVE_DECISION',
+            },
+          });
+        }
+
         return true;
       } catch (err) {
-        console.warn(
-          "[SessionContext] Gagal memperbarui keputusan izin, rollback:",
-          err,
-        );
+        console.warn('[SessionContext] Gagal memperbarui keputusan izin, rollback:', err);
         setLeaveRequests((prev) =>
-          prev.map((item) => (item.id === requestId ? existing : item)),
+          prev.map((item) => (item.id === requestId ? existing : item))
         );
         return false;
       } finally {
         setReviewingLeaveIds((prev) => prev.filter((id) => id !== requestId));
       }
     },
-    [leaveRequests, sessions, users, currentAssistantId, markRealtimeSync],
+    [leaveRequests, sessions, schedules, users, currentAssistantId, markRealtimeSync]
   );
 
   const getSessionLeaveRequests = useCallback(
     (sessionId: string): LeaveRequest[] =>
       leaveRequests.filter((l) => l.sessionId === sessionId),
-    [leaveRequests],
+    [leaveRequests]
   );
 
   const getClassById = useCallback(
     (classId: string) => classes.find((cls) => cls.id === classId),
-    [classes],
+    [classes]
   );
 
   const getScheduleById = useCallback(
     (scheduleId: string) => schedules.find((sch) => sch.id === scheduleId),
-    [schedules],
+    [schedules]
   );
 
   const getAssistantById = useCallback(
     (assistantId: string) => users.find((u) => u.id === assistantId),
-    [users],
+    [users]
   );
 
   const getAttendanceCount = useCallback(
-    (sessionId: string) =>
-      attendance.filter((a) => a.sessionId === sessionId).length,
-    [attendance],
+    (sessionId: string) => attendance.filter((a) => a.sessionId === sessionId).length,
+    [attendance]
   );
 
   const getClassesWithDetails = useCallback((): LabClassWithDetails[] => {
@@ -1064,8 +1158,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             id: rec.id,
             sessionId: rec.sessionId,
             userId: rec.userId,
-            userName: student?.name ?? "Praktikan Tidak Dikenal",
-            userEmail: student?.email ?? "-",
+            userName: student?.name ?? 'Praktikan Tidak Dikenal',
+            userEmail: student?.email ?? '-',
             recordedAt: rec.recordedAt,
             latitude: rec.latitude,
             longitude: rec.longitude,
@@ -1075,11 +1169,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         })
         .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
     },
-    [attendance, users],
+    [attendance, users]
   );
 
   const getPractitioners = useCallback((): User[] => {
-    return users.filter((u) => u.role === "praktikan");
+    return users.filter((u) => u.role === 'praktikan');
   }, [users]);
 
   // Mengajukan izin baru dengan analisis AI sentimen dan persistensi Firestore
@@ -1099,13 +1193,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         id: requestId,
         sessionId: data.sessionId,
         userId: currentStudentId,
-        studentName: student?.name ?? "Praktikan",
-        studentEmail: student?.email ?? "praktikan@example.test",
+        studentName: student?.name ?? 'Praktikan',
+        studentEmail: student?.email ?? 'praktikan@example.test',
         reason: data.reason,
         sentiment: data.sentiment,
         category: data.category,
         aiAnalysis: data.aiAnalysis,
-        status: "PENDING",
+        status: 'PENDING',
         createdAt: now,
       };
 
@@ -1113,11 +1207,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         id: requestId,
         sessionId: data.sessionId,
         userId: currentStudentId,
-        userName: student?.name ?? "Praktikan",
-        userEmail: student?.email ?? "praktikan@example.test",
-        category: (data.category as LeaveCategory) || "LAINNYA",
+        userName: student?.name ?? 'Praktikan',
+        userEmail: student?.email ?? 'praktikan@example.test',
+        category: (data.category as LeaveCategory) || 'LAINNYA',
         reason: data.reason,
-        status: "PENDING",
+        status: 'PENDING',
         submittedAt: now,
         sentiment: data.sentiment,
         aiAnalysis: data.aiAnalysis,
@@ -1129,16 +1223,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       if (isFirebaseConfigured) {
         firestoreSubmitLeaveRequest(newLeaveRequest).catch((err) => {
-          console.warn(
-            "[SessionContext] Gagal menyimpan izin ke Firestore:",
-            err,
-          );
+          console.warn('[SessionContext] Gagal menyimpan izin ke Firestore:', err);
         });
       }
 
       return newPermission;
     },
-    [currentStudentId, users, markRealtimeSync],
+    [currentStudentId, users, markRealtimeSync]
   );
 
   // SRS-11: Filter riwayat izin milik praktikan tertentu
@@ -1146,40 +1237,40 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     (userId: string): Permission[] => {
       return permissions.filter((p) => p.userId === userId);
     },
-    [permissions],
+    [permissions]
   );
 
   // SRS-10: Memperbarui status izin (APPROVED/REJECTED) oleh asisten
   const updatePermissionStatus = useCallback(
     (permissionId: string, status: PermissionStatus) => {
       setPermissions((prev) =>
-        prev.map((p) => (p.id === permissionId ? { ...p, status } : p)),
+        prev.map((p) => (p.id === permissionId ? { ...p, status } : p))
       );
       setLeaveRequests((prev) =>
-        prev.map((l) => (l.id === permissionId ? { ...l, status } : l)),
+        prev.map((l) => (l.id === permissionId ? { ...l, status } : l))
       );
     },
-    [],
+    []
   );
 
   // SRS-07 Sprint 3: Pengelolaan Lokasi Laboratorium (CRUD Labs)
   const createLab = useCallback(
     async (input: LabFormInput): Promise<Lab> => {
       if (!input.name || input.name.trim().length === 0) {
-        throw new Error("Nama laboratorium wajib diisi.");
+        throw new Error('Nama laboratorium wajib diisi.');
       }
       const lat = Number(input.latitude);
       const lng = Number(input.longitude);
       const rad = Number(input.radius);
 
       if (isNaN(lat) || lat < -90 || lat > 90) {
-        throw new Error("Latitude harus berupa angka antara -90 dan 90.");
+        throw new Error('Latitude harus berupa angka antara -90 dan 90.');
       }
       if (isNaN(lng) || lng < -180 || lng > 180) {
-        throw new Error("Longitude harus berupa angka antara -180 dan 180.");
+        throw new Error('Longitude harus berupa angka antara -180 dan 180.');
       }
       if (isNaN(rad) || rad <= 0) {
-        throw new Error("Radius presensi harus berupa angka positif.");
+        throw new Error('Radius presensi harus berupa angka positif.');
       }
 
       const now = new Date().toISOString();
@@ -1187,7 +1278,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         id: `lab-${Date.now()}`,
         name: input.name.trim(),
         code: input.code?.trim().toUpperCase(),
-        building: input.building?.trim() || "Gedung Fasilkom",
+        building: input.building?.trim() || 'Gedung Fasilkom',
         latitude: lat,
         longitude: lng,
         radius: rad,
@@ -1207,7 +1298,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return newLab;
     },
-    [markRealtimeSync],
+    [markRealtimeSync]
   );
 
   const updateLab = useCallback(
@@ -1215,27 +1306,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (input.latitude !== undefined) {
         const lat = Number(input.latitude);
         if (isNaN(lat) || lat < -90 || lat > 90) {
-          throw new Error("Latitude harus antara -90 dan 90.");
+          throw new Error('Latitude harus antara -90 dan 90.');
         }
       }
       if (input.longitude !== undefined) {
         const lng = Number(input.longitude);
         if (isNaN(lng) || lng < -180 || lng > 180) {
-          throw new Error("Longitude harus antara -180 dan 180.");
+          throw new Error('Longitude harus antara -180 dan 180.');
         }
       }
       if (input.radius !== undefined) {
         const rad = Number(input.radius);
         if (isNaN(rad) || rad <= 0) {
-          throw new Error("Radius presensi harus lebih dari 0 meter.");
+          throw new Error('Radius presensi harus lebih dari 0 meter.');
         }
       }
 
       const now = new Date().toISOString();
       setLabs((prev) =>
-        prev.map((l) =>
-          l.id === labId ? { ...l, ...input, updatedAt: now } : l,
-        ),
+        prev.map((l) => (l.id === labId ? { ...l, ...input, updatedAt: now } : l))
       );
       markRealtimeSync();
 
@@ -1245,7 +1334,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [markRealtimeSync],
+    [markRealtimeSync]
   );
 
   const deleteLab = useCallback(
@@ -1259,30 +1348,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [markRealtimeSync],
+    [markRealtimeSync]
   );
 
   const getLabById = useCallback(
     (labId: string): Lab | undefined => {
       return labs.find((l) => l.id === labId);
     },
-    [labs],
+    [labs]
   );
 
   // SRS-10 & SRS-11: Aktivitas Laboratorium Real-time (Sesi Berlangsung & Berikutnya)
   const getLabActivity = useCallback(
     (labNameOrId: string) => {
       const targetLab = labs.find(
-        (l) =>
-          l.id === labNameOrId ||
-          l.name.toLowerCase() === labNameOrId.toLowerCase(),
+        (l) => l.id === labNameOrId || l.name.toLowerCase() === labNameOrId.toLowerCase()
       );
-      const targetName = targetLab
-        ? targetLab.name.toLowerCase().trim()
-        : labNameOrId.toLowerCase().trim();
+      const targetName = targetLab ? targetLab.name.toLowerCase().trim() : labNameOrId.toLowerCase().trim();
 
       const labSchedules = schedules.filter(
-        (s) => s.room && s.room.toLowerCase().trim() === targetName,
+        (s) => s.room && s.room.toLowerCase().trim() === targetName
       );
 
       const labItems = labSchedules
@@ -1290,29 +1375,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           const sess = sessions.find((s) => s.scheduleId === sch.id);
           return sess ? { schedule: sch, session: sess } : null;
         })
-        .filter(
-          (item): item is { schedule: Schedule; session: Session } =>
-            item !== null,
-        );
+        .filter((item): item is { schedule: Schedule; session: Session } => item !== null);
 
       // 1. Sesi Ongoing: Prioritaskan status 'OPEN'
-      let ongoing =
-        labItems.find((item) => item.session.status === "OPEN") || null;
+      let ongoing = labItems.find((item) => item.session.status === 'OPEN') || null;
 
       if (!ongoing) {
         const now = new Date();
-        const currentHours = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         ongoing =
           labItems.find(
             (item) =>
-              item.schedule.startTime <= currentHours &&
-              item.schedule.endTime >= currentHours,
+              item.schedule.startTime <= currentHours && item.schedule.endTime >= currentHours
           ) || null;
       }
 
       // 2. Sesi Berikutnya: Sesi mendatang
       const now = new Date();
-      const currentHours = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const ongoingId = ongoing?.session.id;
 
       const upcomingItems = labItems
@@ -1323,21 +1403,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           }
           return item.schedule.startTime > currentHours;
         })
-        .sort((a, b) =>
-          a.schedule.startTime.localeCompare(b.schedule.startTime),
-        );
+        .sort((a, b) => a.schedule.startTime.localeCompare(b.schedule.startTime));
 
-      const next =
-        upcomingItems.length > 0
-          ? upcomingItems[0]
-          : labItems.find((i) => i.session.id !== ongoingId) || null;
+      const next = upcomingItems.length > 0 ? upcomingItems[0] : (labItems.find((i) => i.session.id !== ongoingId) || null);
 
       return {
         ongoing,
         next,
       };
     },
-    [labs, schedules, sessions],
+    [labs, schedules, sessions]
   );
 
   const value = useMemo(
@@ -1356,8 +1431,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       isFirestoreConnected,
-      currentAssistantId:
-        profile?.role === "asisten" ? profile.id : currentAssistantId,
+      currentAssistantId: profile?.role === 'asisten' ? profile.id : currentAssistantId,
       setCurrentAssistantId,
       createClass,
       updateClass,
@@ -1383,8 +1457,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       getSessionAttendanceRecords,
       getPractitioners,
       permissions,
-      currentStudentId:
-        profile?.role === "praktikan" ? profile.id : currentStudentId,
+      currentStudentId: profile?.role === 'praktikan' ? profile.id : currentStudentId,
       setCurrentStudentId,
       addPermission,
       getPermissionsByUser,
@@ -1447,17 +1520,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       deleteLab,
       getLabById,
       getLabActivity,
-    ],
+    ]
   );
 
-  return (
-    <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
-  );
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
 export function useSessionContext() {
   const context = useContext(SessionContext);
-  if (!context)
-    throw new Error("useSessionContext must be used within SessionProvider");
+  if (!context) throw new Error('useSessionContext must be used within SessionProvider');
   return context;
 }

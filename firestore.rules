@@ -54,7 +54,7 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 2. KOLEKSI CLASSES (Kelas Praktikum - SRS-07)
+    // 2. KOLEKSI CLASSES & SCHEDULES (SRS-07)
     // ==========================================
     match /classes/{classId} {
       // Praktikan dan asisten dapat melihat daftar kelas
@@ -63,13 +63,27 @@ service cloud.firestore {
       allow write: if isAssistant();
     }
 
+    match /schedules/{scheduleId} {
+      // Praktikan dan asisten dapat melihat jadwal praktikum
+      allow read: if isAuthenticated();
+      // Hanya role Asisten yang berhak membuat, mengedit, atau menghapus jadwal
+      allow write: if isAssistant();
+    }
+
     // ==========================================
-    // 3. KOLEKSI SESSIONS (Sesi Praktikum - SRS-07 & SRS-08)
+    // 3. KOLEKSI SESSIONS & STATUS LOGS (SRS-07 & SRS-08)
     // ==========================================
     match /sessions/{sessionId} {
       // Praktikan dan asisten dapat melihat jadwal & status sesi
       allow read: if isAuthenticated();
       // Hanya role Asisten yang berhak membuka/menutup sesi (OPEN/CLOSED) atau mengubah jadwal
+      allow write: if isAssistant();
+    }
+
+    match /status_logs/{logId} {
+      // Praktikan dan asisten dapat membaca riwayat status sesi
+      allow read: if isAuthenticated();
+      // Hanya role Asisten yang berhak mencatat riwayat perubahan status sesi
       allow write: if isAssistant();
     }
 

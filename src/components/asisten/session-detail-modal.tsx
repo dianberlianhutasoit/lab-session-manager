@@ -40,6 +40,8 @@ export function SessionDetailModal({
   onToggleStatus,
   onEditSession,
 }: SessionDetailModalProps) {
+  const [showQRModal, setShowQRModal] = useState(false);
+
   if (!session) return null;
 
   const {
@@ -52,7 +54,6 @@ export function SessionDetailModal({
     attendanceCount,
   } = session;
   const isOpen = status === 'OPEN';
-  const [showQRModal, setShowQRModal] = useState(false);
 
   const handleToggleWithConfirmation = () => {
     confirmSessionStatusChange({
@@ -267,6 +268,16 @@ export function SessionDetailModal({
 
           {/* Action Footer (SRS-07, SRS-08) */}
           <View style={styles.footer}>
+            {isOpen ? (
+              <Pressable
+                onPress={() => setShowQRModal(true)}
+                style={styles.qrModalButton}>
+                <ThemedText type="smallBold" style={styles.qrModalButtonText}>
+                  📱 QR Presensi
+                </ThemedText>
+              </Pressable>
+            ) : null}
+
             {onEditSession ? (
               <Pressable
                 onPress={() => {
@@ -292,13 +303,18 @@ export function SessionDetailModal({
                 {isUpdating
                   ? '⏳ Memproses Status...'
                   : isOpen
-                    ? '🔴 Tutup Sesi Sekarang'
-                    : '🟢 Buka Sesi Sekarang'}
+                    ? '🔴 Tutup Sesi'
+                    : '🟢 Buka Sesi'}
               </ThemedText>
             </Pressable>
           </View>
         </ThemedView>
       </View>
+      <SessionQRModal
+        visible={showQRModal}
+        session={session}
+        onClose={() => setShowQRModal(false)}
+      />
     </Modal>
   );
 }
@@ -437,6 +453,20 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E2E8F0',
+  },
+  qrModalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#EDE9FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      web: { cursor: 'pointer' },
+    }),
+  },
+  qrModalButtonText: {
+    color: '#6D28D9',
   },
   editModalButton: {
     flex: 1,

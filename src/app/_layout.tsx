@@ -30,6 +30,7 @@ export default function RootLayout() {
           <SessionProvider>
             <AnimatedSplashOverlay />
             <OfflineBanner />
+            <NotificationPermissionBanner />
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(main)" />
@@ -37,17 +38,6 @@ export default function RootLayout() {
           </SessionProvider>
         </AuthProvider>
       </ThemeProvider>
-      <AuthProvider>
-        <SessionProvider>
-          <AnimatedSplashOverlay />
-          <OfflineBanner />
-          <NotificationPermissionBanner />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(main)" />
-          </Stack>
-        </SessionProvider>
-      </AuthProvider>
     </ErrorBoundary>
   );
 }
