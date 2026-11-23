@@ -56,7 +56,7 @@ import type {
   SessionScheduleFormInput,
   SessionStatus,
   SessionStatusLog,
-  User
+  User,
 } from "@/types";
 
 export interface SessionWithDetails extends Session {

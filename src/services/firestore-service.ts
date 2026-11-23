@@ -1,29 +1,17 @@
+import { db } from "@/config/firebase";
 import {
-  collection,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  onSnapshot,
-  query,
-  where,
-  writeBatch,
-  runTransaction,
-  type Unsubscribe,
-} from 'firebase/firestore';
-import { db } from '@/config/firebase';
-import {
+  attendance as initialAttendance,
   classes as initialClasses,
+  labs as initialLabs,
+  leaveRequests as initialLeaveRequests,
   schedules as initialSchedules,
   sessions as initialSessions,
   statusLogs as initialStatusLogs,
-  attendance as initialAttendance,
-  leaveRequests as initialLeaveRequests,
   users as initialUsers,
-} from '@/data/dummy';
+} from "@/data/dummy";
 import type {
   Attendance,
+  Lab,
   LabClass,
   LeaveRequest,
   LeaveStatus,
@@ -31,22 +19,39 @@ import type {
   Session,
   SessionStatus,
   SessionStatusLog,
-} from '@/types';
+} from "@/types";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  runTransaction,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+  type Unsubscribe,
+} from "firebase/firestore";
 
 export const COLLECTIONS = {
-  CLASSES: 'classes',
-  SCHEDULES: 'schedules',
-  SESSIONS: 'sessions',
-  STATUS_LOGS: 'session_status_logs',
-  ATTENDANCE: 'attendance',
-  LEAVE_REQUESTS: 'leave_requests',
-  USERS: 'users',
+  CLASSES: "classes",
+  SCHEDULES: "schedules",
+  SESSIONS: "sessions",
+  STATUS_LOGS: "session_status_logs",
+  ATTENDANCE: "attendance",
+  LEAVE_REQUESTS: "leave_requests",
+  USERS: "users",
+  LABS: "labs",
 } as const;
 
 /**
  * Menghapus properti bernilai undefined agar aman dikirim ke Firestore
  */
-function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, any> {
+function stripUndefined<T extends Record<string, any>>(
+  obj: T,
+): Record<string, any> {
   const cleaned: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
@@ -62,7 +67,7 @@ function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, a
 export function subscribeToCollection<T>(
   collectionName: string,
   onData: (items: T[]) => void,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
 ): Unsubscribe | null {
   if (!db) return null;
 
@@ -79,7 +84,7 @@ export function subscribeToCollection<T>(
     (error) => {
       console.warn(`[Firestore] Error listening to ${collectionName}:`, error);
       onError?.(error);
-    }
+    },
   );
 }
 
@@ -89,13 +94,13 @@ export function subscribeToCollection<T>(
 export function subscribeToSessionAttendance(
   sessionId: string,
   onData: (items: Attendance[]) => void,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
 ): Unsubscribe | null {
   if (!db || !sessionId) return null;
 
   const q = query(
     collection(db, COLLECTIONS.ATTENDANCE),
-    where('sessionId', '==', sessionId)
+    where("sessionId", "==", sessionId),
   );
 
   return onSnapshot(
@@ -108,9 +113,12 @@ export function subscribeToSessionAttendance(
       onData(items);
     },
     (error) => {
-      console.warn(`[Firestore] Error listening to session attendance (${sessionId}):`, error);
+      console.warn(
+        `[Firestore] Error listening to session attendance (${sessionId}):`,
+        error,
+      );
       onError?.(error);
-    }
+    },
   );
 }
 
@@ -120,13 +128,13 @@ export function subscribeToSessionAttendance(
 export function subscribeToSessionLeaveRequests(
   sessionId: string,
   onData: (items: LeaveRequest[]) => void,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
 ): Unsubscribe | null {
   if (!db || !sessionId) return null;
 
   const q = query(
     collection(db, COLLECTIONS.LEAVE_REQUESTS),
-    where('sessionId', '==', sessionId)
+    where("sessionId", "==", sessionId),
   );
 
   return onSnapshot(
@@ -139,9 +147,12 @@ export function subscribeToSessionLeaveRequests(
       onData(items);
     },
     (error) => {
-      console.warn(`[Firestore] Error listening to session leave requests (${sessionId}):`, error);
+      console.warn(
+        `[Firestore] Error listening to session leave requests (${sessionId}):`,
+        error,
+      );
       onError?.(error);
-    }
+    },
   );
 }
 
@@ -169,7 +180,7 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
     for (const cls of initialClasses) {
       batch.set(
         doc(db, COLLECTIONS.CLASSES, cls.id),
-        stripUndefined({ ...cls, createdAt: now, updatedAt: now })
+        stripUndefined({ ...cls, createdAt: now, updatedAt: now }),
       );
     }
 
@@ -180,7 +191,7 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
     for (const sess of initialSessions) {
       batch.set(
         doc(db, COLLECTIONS.SESSIONS, sess.id),
-        stripUndefined({ ...sess, createdAt: now, updatedAt: now })
+        stripUndefined({ ...sess, createdAt: now, updatedAt: now }),
       );
     }
 
@@ -193,12 +204,19 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
     }
 
     for (const leave of initialLeaveRequests) {
-      batch.set(doc(db, COLLECTIONS.LEAVE_REQUESTS, leave.id), stripUndefined(leave));
+      batch.set(
+        doc(db, COLLECTIONS.LEAVE_REQUESTS, leave.id),
+        stripUndefined(leave),
+      );
+    }
+
+    for (const lab of initialLabs) {
+      batch.set(doc(db, COLLECTIONS.LABS, lab.id), stripUndefined(lab));
     }
 
     await batch.commit();
   } catch (error) {
-    console.warn('[Firestore] Gagal melakukan seed data awal:', error);
+    console.warn("[Firestore] Gagal melakukan seed data awal:", error);
   }
 }
 
@@ -214,7 +232,7 @@ export async function firestoreCreateClass(labClass: LabClass): Promise<void> {
       ...labClass,
       createdAt: labClass.createdAt ?? now,
       updatedAt: now,
-    })
+    }),
   );
 }
 
@@ -224,7 +242,7 @@ export async function firestoreCreateClass(labClass: LabClass): Promise<void> {
 export async function firestoreUpdateClass(
   classId: string,
   updates: Partial<LabClass>,
-  relatedScheduleIds: string[]
+  relatedScheduleIds: string[],
 ): Promise<void> {
   if (!db) return;
   const batch = writeBatch(db);
@@ -235,7 +253,7 @@ export async function firestoreUpdateClass(
     stripUndefined({
       ...updates,
       updatedAt: now,
-    })
+    }),
   );
 
   const scheduleSyncPayload = stripUndefined({
@@ -246,7 +264,10 @@ export async function firestoreUpdateClass(
 
   if (Object.keys(scheduleSyncPayload).length > 0) {
     for (const scheduleId of relatedScheduleIds) {
-      batch.update(doc(db, COLLECTIONS.SCHEDULES, scheduleId), scheduleSyncPayload);
+      batch.update(
+        doc(db, COLLECTIONS.SCHEDULES, scheduleId),
+        scheduleSyncPayload,
+      );
     }
   }
 
@@ -266,20 +287,23 @@ export async function firestoreDeleteClass(classId: string): Promise<void> {
  */
 export async function firestoreCreateSessionAndSchedule(
   schedule: Schedule,
-  session: Session
+  session: Session,
 ): Promise<void> {
   if (!db) return;
   const batch = writeBatch(db);
   const now = new Date().toISOString();
 
-  batch.set(doc(db, COLLECTIONS.SCHEDULES, schedule.id), stripUndefined(schedule));
+  batch.set(
+    doc(db, COLLECTIONS.SCHEDULES, schedule.id),
+    stripUndefined(schedule),
+  );
   batch.set(
     doc(db, COLLECTIONS.SESSIONS, session.id),
     stripUndefined({
       ...session,
       createdAt: session.createdAt ?? now,
       updatedAt: now,
-    })
+    }),
   );
 
   await batch.commit();
@@ -292,7 +316,7 @@ export async function firestoreUpdateSessionAndSchedule(
   sessionId: string,
   scheduleId: string,
   sessionUpdates: Partial<Session>,
-  scheduleUpdates: Partial<Schedule>
+  scheduleUpdates: Partial<Schedule>,
 ): Promise<void> {
   if (!db) return;
   const batch = writeBatch(db);
@@ -303,12 +327,12 @@ export async function firestoreUpdateSessionAndSchedule(
     stripUndefined({
       ...sessionUpdates,
       updatedAt: now,
-    })
+    }),
   );
 
   batch.update(
     doc(db, COLLECTIONS.SCHEDULES, scheduleId),
-    stripUndefined(scheduleUpdates)
+    stripUndefined(scheduleUpdates),
   );
 
   await batch.commit();
@@ -320,7 +344,7 @@ export async function firestoreUpdateSessionAndSchedule(
 export async function firestoreDeleteSessionAndSchedule(
   sessionId: string,
   scheduleId: string,
-  attendanceIds: string[]
+  attendanceIds: string[],
 ): Promise<void> {
   if (!db) return;
   const batch = writeBatch(db);
@@ -347,7 +371,7 @@ export async function firestoreUpdateSessionStatus(
     closedAt?: string;
     lastUpdatedBy?: string;
   },
-  statusLog?: SessionStatusLog
+  statusLog?: SessionStatusLog,
 ): Promise<void> {
   if (!db) return;
   const batch = writeBatch(db);
@@ -361,11 +385,14 @@ export async function firestoreUpdateSessionStatus(
       closedAt: metadata?.closedAt,
       lastUpdatedBy: metadata?.lastUpdatedBy,
       updatedAt: now,
-    })
+    }),
   );
 
   if (statusLog) {
-    batch.set(doc(db, COLLECTIONS.STATUS_LOGS, statusLog.id), stripUndefined(statusLog));
+    batch.set(
+      doc(db, COLLECTIONS.STATUS_LOGS, statusLog.id),
+      stripUndefined(statusLog),
+    );
   }
 
   await batch.commit();
@@ -378,7 +405,7 @@ export async function firestoreBatchCloseSessions(
   sessionIds: string[],
   closedAt: string,
   lastUpdatedBy: string,
-  logs: SessionStatusLog[]
+  logs: SessionStatusLog[],
 ): Promise<void> {
   if (!db || sessionIds.length === 0) return;
   const batch = writeBatch(db);
@@ -387,11 +414,11 @@ export async function firestoreBatchCloseSessions(
     batch.update(
       doc(db, COLLECTIONS.SESSIONS, sessionId),
       stripUndefined({
-        status: 'CLOSED' as SessionStatus,
+        status: "CLOSED" as SessionStatus,
         closedAt,
         lastUpdatedBy,
         updatedAt: closedAt,
-      })
+      }),
     );
   }
 
@@ -407,10 +434,12 @@ export async function firestoreBatchCloseSessions(
  * 1. Validasi status sesi OPEN di dalam transaksi (SRS-04)
  * 2. Cegah presensi ganda melalui composite ID (${sessionId}_${userId}) & verifikasi keberadaan dokumen (SRS-05)
  */
-export async function firestoreRecordAttendance(record: Attendance): Promise<void> {
+export async function firestoreRecordAttendance(
+  record: Attendance,
+): Promise<void> {
   if (!db) return;
 
-  const compositeDocId = record.id.startsWith('attendance-')
+  const compositeDocId = record.id.startsWith("attendance-")
     ? record.id
     : `${record.sessionId}_${record.userId}`;
 
@@ -420,14 +449,21 @@ export async function firestoreRecordAttendance(record: Attendance): Promise<voi
   await runTransaction(db, async (transaction) => {
     // 1. Validasi status sesi di tingkat transaksi (SRS-04)
     const sessionSnapshot = await transaction.get(sessionRef);
-    if (!sessionSnapshot.exists() || sessionSnapshot.data()?.status !== 'OPEN') {
-      throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
+    if (
+      !sessionSnapshot.exists() ||
+      sessionSnapshot.data()?.status !== "OPEN"
+    ) {
+      throw new Error(
+        "Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.",
+      );
     }
 
     // 2. Cegah presensi ganda melalui composite document ID (SRS-05)
     const existingSnap = await transaction.get(attendanceRef);
     if (existingSnap.exists()) {
-      throw new Error('Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.');
+      throw new Error(
+        "Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.",
+      );
     }
 
     transaction.set(
@@ -435,7 +471,7 @@ export async function firestoreRecordAttendance(record: Attendance): Promise<voi
       stripUndefined({
         ...record,
         id: compositeDocId,
-      })
+      }),
     );
   });
 }
@@ -444,12 +480,12 @@ export async function firestoreRecordAttendance(record: Attendance): Promise<voi
  * SRS-11: Simpan pengajuan izin baru praktikan ke Firestore (collection: leave_requests)
  */
 export async function firestoreSubmitLeaveRequest(
-  request: LeaveRequest
+  request: LeaveRequest,
 ): Promise<void> {
   if (!db) return;
   await setDoc(
     doc(db, COLLECTIONS.LEAVE_REQUESTS, request.id),
-    stripUndefined(request)
+    stripUndefined(request),
   );
 }
 
@@ -458,13 +494,13 @@ export async function firestoreSubmitLeaveRequest(
  */
 export async function firestoreReviewLeaveRequest(
   requestId: string,
-  decision: Exclude<LeaveStatus, 'PENDING'>,
+  decision: Exclude<LeaveStatus, "PENDING">,
   metadata: {
     reviewedBy: string;
     reviewedByName: string;
     reviewedAt: string;
     reviewerNote?: string;
-  }
+  },
 ): Promise<void> {
   if (!db) return;
   await updateDoc(
@@ -475,6 +511,48 @@ export async function firestoreReviewLeaveRequest(
       reviewedByName: metadata.reviewedByName,
       reviewedAt: metadata.reviewedAt,
       reviewerNote: metadata.reviewerNote,
-    })
+    }),
   );
+}
+
+/**
+ * SRS-07 Sprint 3: Tambah data laboratorium baru ke Firestore (collection: labs)
+ */
+export async function firestoreCreateLab(lab: Lab): Promise<void> {
+  if (!db) return;
+  const now = new Date().toISOString();
+  await setDoc(
+    doc(db, COLLECTIONS.LABS, lab.id),
+    stripUndefined({
+      ...lab,
+      createdAt: lab.createdAt || now,
+      updatedAt: now,
+    }),
+  );
+}
+
+/**
+ * SRS-07 Sprint 3: Perbarui data laboratorium di Firestore (collection: labs)
+ */
+export async function firestoreUpdateLab(
+  labId: string,
+  updates: Partial<Lab>,
+): Promise<void> {
+  if (!db) return;
+  const now = new Date().toISOString();
+  await updateDoc(
+    doc(db, COLLECTIONS.LABS, labId),
+    stripUndefined({
+      ...updates,
+      updatedAt: now,
+    }),
+  );
+}
+
+/**
+ * SRS-07 Sprint 3: Hapus laboratorium dari Firestore (collection: labs)
+ */
+export async function firestoreDeleteLab(labId: string): Promise<void> {
+  if (!db) return;
+  await deleteDoc(doc(db, COLLECTIONS.LABS, labId));
 }

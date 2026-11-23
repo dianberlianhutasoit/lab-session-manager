@@ -1,6 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import * as Location from "expo-location";
 import PresensiModal from "@/components/praktikan/PresensiModal";
 import { useSessionContext } from "@/context/session-context";
 import { useAuth } from "@/context/auth-context";
@@ -48,7 +49,18 @@ export default function PraktikanDetailScreen() {
     if (!isOpen || hasAttended || !practitioner) return;
     setSubmitting(true); setAttendanceError('');
     try {
-      const created = await recordAttendance(session.id, practitioner.id, new Date().toISOString());
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== Location.PermissionStatus.GRANTED) {
+        throw new Error('Izin lokasi diperlukan untuk memverifikasi presensi.');
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const created = await recordAttendance(session.id, practitioner.id, new Date().toISOString(), {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      });
       if (!created) setAttendanceError('Presensi untuk sesi ini sudah tercatat.');
       setModalVisible(false);
     } catch (cause) {

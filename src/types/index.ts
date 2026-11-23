@@ -4,13 +4,50 @@ export type SessionStatus = "OPEN" | "CLOSED";
 
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
 
-export type LeaveCategory = "SAKIT" | "DISPENSASI" | "IZIN_AKADEMIK" | "LAINNYA";
+export type LeaveCategory =
+  | "SAKIT"
+  | "DISPENSASI"
+  | "IZIN_AKADEMIK"
+  | "LAINNYA";
 
 export interface User {
   id: string;
   name: string;
   email: string;
   role: Role;
+  expoPushToken?: string | null;
+}
+
+/**
+ * SRS-07 Sprint 3: Representasi Data Lokasi Laboratorium (collection: labs)
+ */
+export interface Lab {
+  id: string;
+  name: string;
+  code?: string;
+  building: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  capacity?: number;
+  description?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Payload Form untuk Tambah / Edit Laboratorium
+ */
+export interface LabFormInput {
+  name: string;
+  code?: string;
+  building: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  capacity?: number;
+  description?: string;
 }
 
 /**
@@ -103,6 +140,7 @@ export interface RadiusValidationResult {
 export interface AttendanceLocationPayload {
   latitude: number;
   longitude: number;
+  accuracy?: number | null;
   distanceMeters?: number;
   method?: AttendanceMethod;
   qrCodeToken?: string;
