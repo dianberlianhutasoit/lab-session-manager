@@ -43,8 +43,18 @@ export default function MapsScreen() {
     timeInterval: 5000,
   });
 
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const isMapKeyConfigured = Boolean(
+    mapsApiKey &&
+    mapsApiKey !== 'NOT_CONFIGURED' &&
+    mapsApiKey !== 'YOUR_GOOGLE_MAPS_API_KEY' &&
+    mapsApiKey !== 'your_google_maps_api_key'
+  );
+
   const [selectedLab, setSelectedLab] = useState<Lab | null>(null);
-  const [viewMode, setViewMode] = useState<'map' | 'list'>(Platform.OS === 'web' ? 'list' : 'map');
+  const [viewMode, setViewMode] = useState<'map' | 'list'>(
+    Platform.OS === 'web' || !isMapKeyConfigured ? 'list' : 'map'
+  );
 
   // Assistant management modal
   const [editingLab, setEditingLab] = useState<Lab | null>(null);
@@ -155,7 +165,7 @@ export default function MapsScreen() {
     return getLabActivity(selectedLab.id);
   }, [selectedLab, getLabActivity]);
 
-  const isMapPlatformAvailable = Platform.OS !== 'web';
+  const isMapPlatformAvailable = Platform.OS !== 'web' && isMapKeyConfigured;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -244,6 +254,15 @@ export default function MapsScreen() {
                 </ThemedText>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+
+        {/* Banner Penjelasan bila Google Maps API Key belum disetel */}
+        {!isMapKeyConfigured && Platform.OS !== 'web' ? (
+          <View style={[styles.warningBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', marginTop: 4 }]}>
+            <ThemedText type="small" style={{ color: '#0369A1' }}>
+              ℹ️ Google Maps API Key belum disetel di .env. Menggunakan tampilan daftar lab (SRS-12).
+            </ThemedText>
           </View>
         ) : null}
       </View>
