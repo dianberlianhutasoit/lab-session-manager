@@ -18,7 +18,8 @@
         "buildType": "apk"
       },
       "env": {
-        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyD0SFGH8uXCvrc4Q8uguyIOIFY5Rp5oUfY"
       }
     },
     "production": {

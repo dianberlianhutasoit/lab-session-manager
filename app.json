@@ -16,6 +16,11 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
       ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD0SFGH8uXCvrc4Q8uguyIOIFY5Rp5oUfY"
+        }
+      },
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -50,7 +55,7 @@
       [
         "react-native-maps",
         {
-          "androidApiKey": "AIzaSyD0SFGH8uXCvrc4Q8uguyIOIFY5Rp5oUfY"
+          "androidGoogleMapsApiKey": "AIzaSyD0SFGH8uXCvrc4Q8uguyIOIFY5Rp5oUfY"
         }
       ],
       [
