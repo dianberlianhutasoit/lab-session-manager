@@ -1,6 +1,6 @@
 try {
   // Memastikan environment variable dari .env / .env.local dimuat ke process.env
-  require('@expo/env').load(process.cwd());
+  require("@expo/env").load(process.cwd());
 } catch {
   // Abaikan jika @expo/env sudah ditangani oleh Expo CLI
 }
@@ -16,11 +16,11 @@ module.exports = ({ config }) => {
 
   // Pastikan react-native-maps plugin terdaftar dengan benar
   const existingMapsPluginIndex = plugins.findIndex((p) =>
-    Array.isArray(p) ? p[0] === 'react-native-maps' : p === 'react-native-maps'
+    Array.isArray(p) ? p[0] === "react-native-maps" : p === "react-native-maps",
   );
 
   const mapsPluginConfig = [
-    'react-native-maps',
+    "react-native-maps",
     googleMapsApiKey ? { androidGoogleMapsApiKey: googleMapsApiKey } : {},
   ];
 

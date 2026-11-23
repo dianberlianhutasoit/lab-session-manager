@@ -214,6 +214,10 @@ export async function seedInitialFirestoreDataIfEmpty(): Promise<void> {
       batch.set(doc(db, COLLECTIONS.LABS, lab.id), stripUndefined(lab));
     }
 
+    for (const lab of initialLabs) {
+      batch.set(doc(db, COLLECTIONS.LABS, lab.id), stripUndefined(lab));
+    }
+
     await batch.commit();
   } catch (error) {
     console.warn("[Firestore] Gagal melakukan seed data awal:", error);
