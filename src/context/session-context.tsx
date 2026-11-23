@@ -10,6 +10,7 @@ import React, {
 
 import type { LabClassWithDetails } from "@/components/asisten/class-card";
 import { isFirebaseConfigured } from "@/config/firebase";
+import { formatDistance, validateLabRadius } from "@/constants/lab-location";
 import { useAuth } from "@/context/auth-context";
 import {
   attendance as initialAttendance,
@@ -30,6 +31,7 @@ import {
   firestoreDeleteSessionAndSchedule,
   firestoreRecordAttendance,
   firestoreReviewLeaveRequest,
+  firestoreSubmitLeaveRequest,
   firestoreUpdateClass,
   firestoreUpdateSessionAndSchedule,
   firestoreUpdateSessionStatus,
@@ -38,20 +40,23 @@ import {
 } from "@/services/firestore-service";
 import type {
   Attendance,
+  AttendanceLocationPayload,
   AttendanceRecord,
   LabClass,
   LabClassFormInput,
+  LeaveCategory,
   LeaveRequest,
   LeaveStatus,
   Permission,
   PermissionCategory,
   PermissionStatus,
   Schedule,
+  SentimentLabel,
   Session,
   SessionScheduleFormInput,
   SessionStatus,
   SessionStatusLog,
-  User,
+  User
 } from "@/types";
 
 export interface SessionWithDetails extends Session {
@@ -113,10 +118,12 @@ interface SessionContextValue {
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
+  // SRS-04 & SRS-05: Rekap Presensi Real-Time & Validasi Radius Lokasi / Anti Presensi Ganda
   recordAttendance: (
     sessionId: string,
     userId: string,
     recordedAt: string,
+    locationDetails?: AttendanceLocationPayload,
   ) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
@@ -142,6 +149,7 @@ interface SessionContextValue {
   addPermission: (data: {
     sessionId: string;
     reason: string;
+    sentiment?: SentimentLabel;
     category?: PermissionCategory;
     aiAnalysis?: string;
   }) => Permission;
@@ -179,14 +187,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const attendanceRef = useRef<Attendance[]>(initialAttendance);
-  const [currentAssistantId, setCurrentAssistantId] = useState<string>(() =>
-    profile?.role === "asisten" ? profile.id : "user-asisten-001",
-  );
+  const [currentAssistantId, setCurrentAssistantId] =
+    useState<string>("user-asisten-001");
   const [permissions, setPermissions] =
     useState<Permission[]>(initialPermissions);
-  const [currentStudentId, setCurrentStudentId] = useState<string>(() =>
-    profile?.role === "praktikan" ? profile.id : "user-praktikan-001",
-  );
+  const [currentStudentId, setCurrentStudentId] =
+    useState<string>("user-praktikan-001");
+
+  // Sinkronisasi dengan user profile yang login jika ada
+  useEffect(() => {
+    if (!profile) return;
+    Promise.resolve().then(() => {
+      if (profile.role === "asisten") {
+        setCurrentAssistantId(profile.id);
+      } else if (profile.role === "praktikan") {
+        setCurrentStudentId(profile.id);
+      }
+    });
+  }, [profile]);
 
   useEffect(() => {
     attendanceRef.current = attendance;
@@ -212,6 +230,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => {
         console.warn("[SessionContext] Gagal inisialisasi Firestore:", err);
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       })
       .finally(() => {
         if (isMounted) setLoading(false);
@@ -269,6 +290,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             b.submittedAt.localeCompare(a.submittedAt),
           );
           setLeaveRequests(sorted);
+
+          // Sinkronisasi real-time ke model permissions agar antarmuka riwayat praktikan ter-update otomatis
+          const mappedPermissions: Permission[] = sorted.map((req) => ({
+            id: req.id,
+            sessionId: req.sessionId,
+            userId: req.userId,
+            studentName: req.userName,
+            studentEmail: req.userEmail,
+            reason: req.reason,
+            sentiment: req.sentiment,
+            category: req.category as PermissionCategory,
+            aiAnalysis: req.aiAnalysis,
+            status: req.status,
+            createdAt: req.submittedAt,
+          }));
+          setPermissions(mappedPermissions);
+
           markRealtimeSync();
         }
       },
@@ -768,30 +806,79 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [statusLogs],
   );
 
-  // SRS-09: Mencatat presensi & memicu event pembaruan real-time
+  // SRS-04 & SRS-05: Mencatat presensi dengan validasi status sesi OPEN, validasi radius lab, dan cegah presensi ganda
   const recordAttendance = useCallback(
     async (
       sessionId: string,
       userId: string,
       recordedAt: string,
+      locationDetails?: AttendanceLocationPayload,
     ): Promise<boolean> => {
+      // 1. Validasi keberadaan sesi & status sesi OPEN (SRS-04)
       const targetSession = sessions.find((s) => s.id === sessionId);
-      if (targetSession && targetSession.status !== "OPEN") {
+      if (!targetSession) {
+        throw new Error("Sesi praktikum tidak ditemukan.");
+      }
+      if (targetSession.status !== "OPEN") {
         throw new Error(
           "Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.",
         );
       }
 
+      // 2. Validasi cegah presensi ganda (SRS-05)
       const alreadyRecorded = attendanceRef.current.some(
         (record) => record.sessionId === sessionId && record.userId === userId,
       );
-      if (alreadyRecorded) return false;
+      if (alreadyRecorded) {
+        throw new Error(
+          "Presensi Anda untuk sesi praktikum ini sudah tercatat sebelumnya.",
+        );
+      }
 
+      // 3. Validasi radius laboratorium di logika simpan (SRS-04)
+      let calculatedDistance = locationDetails?.distanceMeters;
+      if (
+        locationDetails &&
+        (locationDetails.method === "LOCATION" ||
+          locationDetails.latitude !== undefined)
+      ) {
+        const schedule = schedules.find(
+          (sch) => sch.id === targetSession.scheduleId,
+        );
+        const roomName = schedule?.room;
+        const validation = validateLabRadius(
+          {
+            latitude: locationDetails.latitude,
+            longitude: locationDetails.longitude,
+          },
+          roomName,
+        );
+
+        calculatedDistance = validation.distanceMeters;
+
+        if (!validation.isWithinRadius) {
+          throw new Error(
+            `Presensi ditolak: Anda berada di luar radius laboratorium (${formatDistance(
+              validation.distanceMeters,
+            )} > ${validation.maxRadiusMeters} m).`,
+          );
+        }
+      }
+
+      // 4. Buat record presensi dengan composite ID (SRS-05)
+      const compositeId = `attendance-${sessionId}-${userId}`;
       const newRecord: Attendance = {
-        id: `attendance-${sessionId}-${userId}`,
+        id: compositeId,
         sessionId,
         userId,
         recordedAt,
+        latitude: locationDetails?.latitude,
+        longitude: locationDetails?.longitude,
+        distanceMeters: calculatedDistance,
+        method:
+          locationDetails?.method ??
+          (locationDetails?.latitude ? "LOCATION" : "MANUAL"),
+        qrCodeToken: locationDetails?.qrCodeToken,
       };
 
       const nextAttendance = [...attendanceRef.current, newRecord];
@@ -805,7 +892,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions, markRealtimeSync],
+    [sessions, schedules, markRealtimeSync],
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -849,6 +936,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
                 ...item,
                 status: decision,
                 ...metadata,
+              }
+            : item,
+        ),
+      );
+      setPermissions((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: decision,
               }
             : item,
         ),
@@ -945,6 +1042,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             userName: student?.name ?? "Praktikan Tidak Dikenal",
             userEmail: student?.email ?? "-",
             recordedAt: rec.recordedAt,
+            latitude: rec.latitude,
+            longitude: rec.longitude,
+            distanceMeters: rec.distanceMeters,
+            method: rec.method,
           };
         })
         .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
@@ -956,31 +1057,63 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return users.filter((u) => u.role === "praktikan");
   }, [users]);
 
-  // SRS-11: Mengajukan izin baru
+  // Mengajukan izin baru dengan analisis AI sentimen dan persistensi Firestore
   const addPermission = useCallback(
     (data: {
       sessionId: string;
       reason: string;
+      sentiment?: SentimentLabel;
       category?: PermissionCategory;
       aiAnalysis?: string;
     }): Permission => {
       const student = users.find((u) => u.id === currentStudentId);
+      const now = new Date().toISOString();
+      const requestId = `leave-${data.sessionId}-${currentStudentId}-${Date.now()}`;
+
       const newPermission: Permission = {
-        id: `permission-${Date.now()}`,
+        id: requestId,
         sessionId: data.sessionId,
         userId: currentStudentId,
         studentName: student?.name ?? "Praktikan",
         studentEmail: student?.email ?? "praktikan@example.test",
         reason: data.reason,
-        category: data.category ?? "Unclassified",
+        sentiment: data.sentiment,
+        category: data.category,
         aiAnalysis: data.aiAnalysis,
         status: "PENDING",
-        createdAt: new Date().toISOString(),
+        createdAt: now,
       };
+
+      const newLeaveRequest: LeaveRequest = {
+        id: requestId,
+        sessionId: data.sessionId,
+        userId: currentStudentId,
+        userName: student?.name ?? "Praktikan",
+        userEmail: student?.email ?? "praktikan@example.test",
+        category: (data.category as LeaveCategory) || "LAINNYA",
+        reason: data.reason,
+        status: "PENDING",
+        submittedAt: now,
+        sentiment: data.sentiment,
+        aiAnalysis: data.aiAnalysis,
+      };
+
       setPermissions((prev) => [newPermission, ...prev]);
+      setLeaveRequests((prev) => [newLeaveRequest, ...prev]);
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        firestoreSubmitLeaveRequest(newLeaveRequest).catch((err) => {
+          console.warn(
+            "[SessionContext] Gagal menyimpan izin ke Firestore:",
+            err,
+          );
+        });
+      }
+
       return newPermission;
     },
-    [currentStudentId, users],
+    [currentStudentId, users, markRealtimeSync],
   );
 
   // SRS-11: Filter riwayat izin milik praktikan tertentu
@@ -996,6 +1129,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     (permissionId: string, status: PermissionStatus) => {
       setPermissions((prev) =>
         prev.map((p) => (p.id === permissionId ? { ...p, status } : p)),
+      );
+      setLeaveRequests((prev) =>
+        prev.map((l) => (l.id === permissionId ? { ...l, status } : l)),
       );
     },
     [],

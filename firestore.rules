@@ -44,8 +44,12 @@ service cloud.firestore {
     match /users/{userId} {
       // Semua pengguna login bisa membaca profil dasar sesama pengguna/asisten
       allow read: if isAuthenticated();
-      // Pengguna hanya bisa mendaftarkan atau memperbarui profil miliknya sendiri
-      allow create, update: if isAuthenticated() && isOwner(userId);
+      // Pengguna hanya bisa mendaftarkan profil miliknya sendiri saat awal registrasi
+      allow create: if isAuthenticated() && isOwner(userId);
+      // Pemilik profil dapat memperbarui profil miliknya, TETAPI field 'role' bersifat immutable
+      // (mencegah privilege escalation dari praktikan menjadi asisten)
+      allow update: if isAuthenticated() && isOwner(userId) &&
+        request.resource.data.role == resource.data.role;
       allow delete: if false; // Profil tidak boleh sembarangan dihapus
     }
 
@@ -87,9 +91,9 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 5. KOLEKSI PERMISSIONS (Pengajuan Izin - SRS-11 s/d SRS-14)
+    // 5. KOLEKSI LEAVE_REQUESTS & PERMISSIONS (Pengajuan Izin - SRS-10 s/d SRS-14)
     // ==========================================
-    match /permissions/{permissionId} {
+    match /leave_requests/{requestId} {
       // Praktikan hanya bisa membaca izin miliknya; Asisten bisa membaca seluruh pengajuan izin
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid || isAssistant()
@@ -108,6 +112,16 @@ service cloud.firestore {
 
       // Izin hanya bisa dihapus oleh asisten jika diperlukan
       allow delete: if isAssistant();
+    }
+
+    match /permissions/{permissionId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAssistant()
+      );
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'PENDING';
+      allow update, delete: if isAssistant();
     }
   }
 }

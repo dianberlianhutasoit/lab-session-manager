@@ -76,11 +76,48 @@ export interface SessionStatusLog {
   changedAt: string;
 }
 
+export type AttendanceMethod = "LOCATION" | "QR" | "MANUAL";
+
+export interface Coordinates {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+}
+
+export interface LabLocationConfig {
+  room: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
+export interface RadiusValidationResult {
+  isWithinRadius: boolean;
+  distanceMeters: number;
+  maxRadiusMeters: number;
+  userCoordinates?: Coordinates;
+  labLocation: LabLocationConfig;
+}
+
+export interface AttendanceLocationPayload {
+  latitude: number;
+  longitude: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
+  qrCodeToken?: string;
+}
+
 export interface Attendance {
   id: string;
   sessionId: string;
   userId: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
+  qrCodeToken?: string;
 }
 
 export interface AttendanceRecord {
@@ -90,14 +127,22 @@ export interface AttendanceRecord {
   userName: string;
   userEmail: string;
   recordedAt: string;
+  latitude?: number;
+  longitude?: number;
+  distanceMeters?: number;
+  method?: AttendanceMethod;
 }
 
-// --- SRS-11 s/d SRS-13: Modul Pengajuan Izin & Integrasi AI ---
+// --- Modul Pengajuan Izin & Integrasi AI Sentimen ---
+export type SentimentLabel = "positif" | "netral" | "negatif" | null;
+
 export type PermissionStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export type PermissionCategory =
   | "SAKIT"
   | "AKADEMIK"
+  | "IZIN_AKADEMIK"
+  | "DISPENSASI"
   | "DARURAT"
   | "LAINNYA"
   | "Unclassified";
@@ -109,7 +154,8 @@ export interface Permission {
   studentName: string;
   studentEmail: string;
   reason: string;
-  category: PermissionCategory;
+  sentiment?: SentimentLabel;
+  category?: PermissionCategory;
   aiAnalysis?: string;
   status: PermissionStatus;
   createdAt: string;
@@ -133,6 +179,8 @@ export interface LeaveRequest {
   reviewedByName?: string;
   reviewedAt?: string;
   reviewerNote?: string;
+  sentiment?: SentimentLabel;
+  aiAnalysis?: string;
 }
 
 /**

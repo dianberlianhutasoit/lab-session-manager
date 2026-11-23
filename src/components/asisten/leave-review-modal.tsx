@@ -149,6 +149,20 @@ function LeaveReviewContent({
           )}
         </View>
 
+        {request.aiAnalysis || request.sentiment ? (
+          <View style={styles.aiCard}>
+            <ThemedText type="smallBold" style={styles.aiCardTitle}>
+              🤖 Rekomendasi AI On-Device (Pendukung Keputusan)
+            </ThemedText>
+            <ThemedText type="small" style={styles.aiCardText}>
+              {request.aiAnalysis ?? `Sentimen terdeteksi: ${request.sentiment}`}
+            </ThemedText>
+            <ThemedText type="small" style={styles.aiDisclaimer}>
+              *Analisis AI hanya berfungsi sebagai informasi pendukung. Keputusan penerimaan izin mutlak dilakukan secara manual oleh asisten lab (SRS-12/14).
+            </ThemedText>
+          </View>
+        ) : null}
+
         <View style={styles.fieldGroup}>
           <ThemedText type="smallBold">
             Catatan Keputusan Asisten (Opsional)
@@ -298,6 +312,29 @@ const styles = StyleSheet.create({
   attachmentLabel: {
     color: '#4F46E5',
     fontSize: 11,
+  },
+  aiCard: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 12,
+    padding: Spacing.three,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  aiCardTitle: {
+    fontSize: 12,
+    color: '#0369A1',
+  },
+  aiCardText: {
+    fontSize: 13,
+    color: '#0C4A6E',
+    fontWeight: '600',
+  },
+  aiDisclaimer: {
+    fontSize: 10,
+    color: '#64748B',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   fieldGroup: {
     gap: 6,

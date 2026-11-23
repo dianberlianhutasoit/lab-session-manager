@@ -12,6 +12,7 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
   return (
     <ErrorBoundary>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -26,6 +27,16 @@ export default function RootLayout() {
           </SessionProvider>
         </AuthProvider>
       </ThemeProvider>
+      <AuthProvider>
+        <SessionProvider>
+          <AnimatedSplashOverlay />
+          <OfflineBanner />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(main)" />
+          </Stack>
+        </SessionProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
