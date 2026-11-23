@@ -7,7 +7,11 @@ export interface SessionCardProps {
   onPress: () => void;
 }
 
-export default function SessionCard({ session, schedule, onPress }: SessionCardProps) {
+export default function SessionCard({
+  session,
+  schedule,
+  onPress,
+}: SessionCardProps) {
   const isOpen = session.status === "OPEN";
 
   return (
@@ -16,17 +20,26 @@ export default function SessionCard({ session, schedule, onPress }: SessionCardP
         <Text style={styles.title} numberOfLines={1}>
           {schedule.title}
         </Text>
-        <View style={[styles.badge, isOpen ? styles.statusOpen : styles.statusClosed]}>
+        <View
+          style={[
+            styles.badge,
+            isOpen ? styles.statusOpen : styles.statusClosed,
+          ]}
+        >
           <Text style={styles.badgeText}>{session.status}</Text>
         </View>
       </View>
 
       <View style={styles.details}>
         <Text style={styles.detailText}>
-          Kode: <Text style={styles.detailHighlight}>{schedule.courseCode}</Text>
+          Kode:{" "}
+          <Text style={styles.detailHighlight}>{schedule.courseCode}</Text>
         </Text>
         <Text style={styles.detailText}>
-          Jadwal: <Text style={styles.detailHighlight}>{schedule.date} · {schedule.startTime}–{schedule.endTime}</Text>
+          Jadwal:{" "}
+          <Text style={styles.detailHighlight}>
+            {schedule.date} · {schedule.startTime}–{schedule.endTime}
+          </Text>
         </Text>
         <Text style={styles.detailText}>
           Ruangan: <Text style={styles.detailHighlight}>{schedule.room}</Text>
@@ -54,7 +67,12 @@ const styles = StyleSheet.create({
   },
   title: { color: "#F8F8F2", fontSize: 16, fontWeight: "bold", flex: 1 },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  badgeText: { color: "#1E1E2A", fontSize: 10, fontWeight: "bold", letterSpacing: 0.5 },
+  badgeText: {
+    color: "#1E1E2A",
+    fontSize: 10,
+    fontWeight: "bold",
+    letterSpacing: 0.5,
+  },
   statusClosed: { backgroundColor: "#6272A4" },
   statusOpen: { backgroundColor: "#F1FA8C" },
   details: { flexDirection: "column", gap: 4 },
