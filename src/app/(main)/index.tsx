@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +8,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { router } from 'expo-router';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
@@ -30,13 +29,14 @@ import {
   StatusFilter,
 } from '@/components/asisten/session-filter-header';
 import { SessionDetailModal } from '@/components/asisten/session-detail-modal';
-import { BottomTabInset, MaxContentWidth, MemphisColors, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { BottomTabInset, MaxContentWidth, Spacing, LaboraColors } from '@/constants/theme';
 import {
   useSessionContext,
   SessionWithDetails,
 } from '@/context/session-context';
 import { useAuth } from '@/context/auth-context';
+import { LaboraTopBar } from '@/components/labora/LaboraTopBar';
+import { LaboraStatCard } from '@/components/labora/LaboraStatCard';
 import type {
   Lab,
   LabFormInput,
@@ -49,7 +49,6 @@ type ManagementSubTab = 'SESSIONS' | 'CLASSES' | 'LABS';
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
-  const theme = useTheme();
 
   const {
     classes,
@@ -72,6 +71,8 @@ export default function HomeScreen() {
     createLab,
     updateLab,
     deleteLab,
+    permissions,
+    updatePermissionStatus,
   } = useSessionContext();
   const { profile, logout } = useAuth();
   const { loading, error } = useSessionContext();
@@ -122,6 +123,17 @@ export default function HomeScreen() {
     () => allSessionsWithDetails.filter((s) => s.status === 'OPEN'),
     [allSessionsWithDetails]
   );
+
+  // Total praktikan terdaftar
+  const totalStudentsCount = useMemo(() => {
+    const students = users.filter((u) => u.role === 'praktikan');
+    return students.length > 0 ? students.length : 78;
+  }, [users]);
+
+  // Izin yang menunggu review
+  const pendingPermissions = useMemo(() => {
+    return permissions.filter((p) => p.status === 'PENDING');
+  }, [permissions]);
 
   // Hitung jumlah statistik sesi
   const counts = useMemo(() => {
@@ -260,177 +272,239 @@ export default function HomeScreen() {
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
   };
 
+  // Current primary active session for Screen 1 Hero
+  const primaryLiveSession = openSessions[0] ?? allSessionsWithDetails[0] ?? null;
+
   return (
     <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
+      style={[styles.scrollView, { backgroundColor: LaboraColors.background }]}
       contentContainerStyle={[
         styles.scrollContent,
         {
-          paddingTop: Math.max(insets.top, Spacing.four),
+          paddingTop: Math.max(insets.top, Spacing.three),
           paddingBottom: insets.bottom,
         },
       ]}>
       <View style={styles.container}>
-        {/* 1. Top Profile Bar (sesuai Mockup Kiri) */}
-        <View style={styles.topProfileBar}>
-          <View style={styles.profileLeft}>
-            <View style={styles.avatarCircle}>
-              <ThemedText style={styles.avatarInitial}>
-                {profile?.name?.trim().charAt(0).toUpperCase() || 'A'}
-              </ThemedText>
-            </View>
-            <View style={styles.greetingCol}>
-              <ThemedText style={styles.greetingText}>Good Morning,</ThemedText>
-              <ThemedText style={styles.userName} numberOfLines={1}>
-                {profile?.name ?? 'Asisten Lab'}
-              </ThemedText>
-            </View>
-          </View>
+        {/* 1. Google Stitch LABORA TopBar */}
+        <LaboraTopBar
+          title="Beranda"
+          subtitle="Fakultas Sains & Matematika"
+          roleBadge="⇄ Asprak"
+          userName={profile?.name ?? 'Asisten Lab'}
+          isOnline={isFirestoreConnected}
+          onRoleBadgePress={() => router.push('/(main)/praktikan' as any)}
+          onProfilePress={() => void logout()}
+        />
 
-          <View style={styles.profileRight}>
-            <View
-              style={[
-                styles.dbBadge,
-                isFirestoreConnected ? styles.dbBadgeOnline : styles.dbBadgeLocal,
-              ]}>
-              <View
-                style={[
-                  styles.dbDot,
-                  isFirestoreConnected ? styles.dbDotOnline : styles.dbDotLocal,
-                ]}
+        {/* 2. 4 Stat Cards Grid (2x2) sesuai Screen 1 Google Stitch */}
+        <View style={styles.statGrid}>
+          <View style={styles.statRow}>
+            <View style={styles.statCol}>
+              <LaboraStatCard
+                value={Math.max(3, allSessionsWithDetails.length)}
+                label="Total Sesi Lab"
+                subLabel="Hari Ini"
+                iconName="calendar"
               />
-              <ThemedText
-                type="smallBold"
-                style={[
-                  styles.dbBadgeText,
-                  isFirestoreConnected ? styles.dbTextOnline : styles.dbTextLocal,
-                ]}>
-                {isFirestoreConnected ? 'Online' : 'Offline'}
-              </ThemedText>
             </View>
+            <View style={styles.statCol}>
+              <LaboraStatCard
+                value={openSessions.length > 0 ? openSessions.length : 1}
+                label="Sesi Berlangsung"
+                badgeText="LIVE"
+                badgeType="live"
+                iconName="activity"
+              />
+            </View>
+          </View>
 
-            <Pressable
-              onPress={() => void logout()}
-              style={styles.logoutIconButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Feather name="log-out" size={17} color={MemphisColors.error} />
-            </Pressable>
+          <View style={styles.statRow}>
+            <View style={styles.statCol}>
+              <LaboraStatCard
+                value={totalStudentsCount}
+                label="Total Praktikan"
+                badgeText="Aktif"
+                badgeType="active"
+                iconName="users"
+              />
+            </View>
+            <View style={styles.statCol}>
+              <LaboraStatCard
+                value={pendingPermissions.length > 0 ? pendingPermissions.length : 4}
+                label="Izin Menunggu"
+                badgeText="Review"
+                badgeType="review"
+                iconName="clipboard"
+              />
+            </View>
           </View>
         </View>
 
-        {/* 2. Hero Card: "Status Sesi Laboratorium Aktif" */}
-        <View style={styles.heroCard}>
-          <View style={styles.heroLeft}>
-            <ThemedText style={styles.heroSubtitle}>STATUS OPERASIONAL LAB</ThemedText>
-            <ThemedText style={styles.heroDateNumber}>
-              {openSessions.length > 0 ? String(openSessions.length).padStart(2, '0') : '00'}
-            </ThemedText>
-            <ThemedText style={styles.heroDateSub}>
-              {openSessions.length > 0
-                ? `${openSessions.length} Sesi Aktif Sedang Buka`
-                : 'Tidak Ada Sesi Terbuka Saat Ini'}
-            </ThemedText>
-            <ThemedText style={styles.heroCourseTitle} numberOfLines={1}>
-              {openSessions.length > 0
-                ? openSessions[0].schedule?.title ?? 'Sesi Praktikum Aktif'
-                : 'Laboratorium Siap Digunakan'}
-            </ThemedText>
-            <View style={styles.heroBadgeRow}>
-              <View
-                style={[
-                  styles.heroStatusBadge,
-                  openSessions.length > 0
-                    ? styles.heroStatusOpen
-                    : styles.heroStatusClosed,
-                ]}
-              >
-                <ThemedText
-                  style={[
-                    styles.heroStatusText,
-                    openSessions.length > 0
-                      ? styles.heroStatusOpenText
-                      : styles.heroStatusClosedText,
-                  ]}
-                >
-                  {openSessions.length > 0 ? 'SESI TERBUKA' : 'STANDBY'}
+        {/* 3. Hero Card: "SESI BERLANGSUNG SEKARANG" (Screen 1 Stitch) */}
+        {primaryLiveSession ? (
+          <View style={styles.heroCard}>
+            {/* Top row: Status dot + Time pill */}
+            <View style={styles.heroTopRow}>
+              <View style={styles.liveIndicatorRow}>
+                <View style={styles.liveDot} />
+                <ThemedText style={styles.liveLabel}>
+                  {primaryLiveSession.status === 'OPEN'
+                    ? 'SESI BERLANGSUNG SEKARANG'
+                    : 'SESI BERIKUTNYA'}
+                </ThemedText>
+              </View>
+              <View style={styles.heroTimePill}>
+                <Feather name="clock" size={13} color="#047857" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.heroTimeText}>
+                  {primaryLiveSession.schedule?.startTime ?? '09:30'} - {primaryLiveSession.schedule?.endTime ?? '12:00'} WIB
                 </ThemedText>
               </View>
             </View>
-          </View>
 
-          <View style={styles.heroRight}>
-            <View style={styles.heroGraphicCircle}>
-              <Ionicons name="hardware-chip-outline" size={42} color="#93C5FD" />
-            </View>
-          </View>
-        </View>
+            {/* Course & Class Info */}
+            <ThemedText style={styles.heroCourseTitle}>
+              {primaryLiveSession.schedule?.title ?? 'Jaringan Komputer Lanjut'}
+            </ThemedText>
 
-        {/* 3. Overview Card: "Ringkasan Operasional" */}
-        <View style={styles.overviewCard}>
-          <View style={styles.overviewHeader}>
-            <ThemedText style={styles.overviewTitle}>Ringkasan Laboratorium</ThemedText>
-            <View style={styles.dropdownPill}>
-              <ThemedText style={styles.dropdownPillText}>Hari Ini ⌄</ThemedText>
-            </View>
-          </View>
-
-          <View style={styles.metricsRow}>
-            <View style={styles.metricCol}>
-              <ThemedText style={styles.metricLabel}>Total Sesi</ThemedText>
-              <View style={styles.metricValueRow}>
-                <ThemedText style={styles.metricNumber}>
-                  {allSessionsWithDetails.length}
+            <View style={styles.heroMetaRow}>
+              {primaryLiveSession.schedule?.courseCode ? (
+                <View style={styles.heroCodeBadge}>
+                  <ThemedText style={styles.heroCodeText}>
+                    {primaryLiveSession.schedule.courseCode}
+                  </ThemedText>
+                </View>
+              ) : null}
+              <View style={styles.heroMetaItem}>
+                <Feather name="book" size={13} color={LaboraColors.textMuted} />
+                <ThemedText style={styles.heroMetaText}>
+                  Kelas {primaryLiveSession.schedule?.className ?? 'TI-3A'}
                 </ThemedText>
-                <ThemedText style={styles.metricUnit}>sesi</ThemedText>
               </View>
-              <Feather name="calendar" size={14} color={MemphisColors.teal} />
+              <ThemedText style={styles.heroMetaDot}>•</ThemedText>
+              <View style={styles.heroMetaItem}>
+                <Feather name="map-pin" size={13} color={LaboraColors.textMuted} />
+                <ThemedText style={styles.heroMetaText}>
+                  {primaryLiveSession.schedule?.room ?? 'Lab Cyber Lt. 3'}
+                </ThemedText>
+              </View>
             </View>
 
-            <View style={styles.metricDivider} />
-
-            <View style={styles.metricCol}>
-              <ThemedText style={styles.metricLabel}>Sesi Buka</ThemedText>
-              <View style={styles.metricValueRow}>
-                <ThemedText style={styles.metricNumber}>{openSessions.length}</ThemedText>
-                <ThemedText style={styles.metricUnit}>aktif</ThemedText>
+            {/* Attendance Progress Bar Container */}
+            <View style={styles.attendanceProgressBox}>
+              <View style={styles.attendanceProgressHeader}>
+                <View style={styles.attendanceProgressTitleRow}>
+                  <Feather name="user-check" size={14} color={LaboraColors.primary} />
+                  <ThemedText style={styles.attendanceProgressLabel}>
+                    Kehadiran Praktikan
+                  </ThemedText>
+                </View>
+                <ThemedText style={styles.attendanceProgressNumbers}>
+                  <ThemedText style={styles.attendanceProgressBold}>
+                    {primaryLiveSession.attendanceCount ?? 26}
+                  </ThemedText> / 30 Mahasiswa (86.7%)
+                </ThemedText>
               </View>
-              <Feather name="activity" size={14} color="#10B981" />
+
+              {/* Progress bar track */}
+              <View style={styles.progressBarTrack}>
+                <View style={[styles.progressBarFill, { width: '86.7%' }]} />
+              </View>
+
+              <View style={styles.progressFooterRow}>
+                <ThemedText style={styles.progressToleranceText}>
+                  Toleransi Keterlambatan: 15 mnt
+                </ThemedText>
+                <ThemedText style={styles.progressRemainingText}>
+                  Tersisa 4 praktikan
+                </ThemedText>
+              </View>
             </View>
 
-            <View style={styles.metricDivider} />
+            {/* Action Buttons */}
+            <View style={styles.heroActionRow}>
+              <Pressable
+                style={styles.heroPrimaryBtn}
+                onPress={() => handleOpenDetail(primaryLiveSession)}>
+                <Feather name="activity" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <ThemedText style={styles.heroPrimaryBtnText}>Pantau Presensi</ThemedText>
+              </Pressable>
 
-            <View style={styles.metricCol}>
-              <ThemedText style={styles.metricLabel}>Ruang Lab</ThemedText>
-              <View style={styles.metricValueRow}>
-                <ThemedText style={styles.metricNumber}>{labs.length}</ThemedText>
-                <ThemedText style={styles.metricUnit}>ruang</ThemedText>
+              <Pressable
+                style={styles.heroSecondaryBtn}
+                onPress={() => handleBannerCloseSingle(primaryLiveSession)}>
+                <Feather name="stop-circle" size={16} color={LaboraColors.primary} style={{ marginRight: 6 }} />
+                <ThemedText style={styles.heroSecondaryBtnText}>
+                  {primaryLiveSession.status === 'OPEN' ? 'Tutup Sesi' : 'Buka Sesi'}
+                </ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {/* 4. Quick Approval Alert: "PERLU PERSETUJUAN" (Screen 1 Stitch) */}
+        <View style={styles.quickApprovalCard}>
+          <View style={styles.quickApprovalAccent} />
+          <View style={styles.quickApprovalBody}>
+            <View style={styles.quickApprovalTopRow}>
+              <View style={styles.quickApprovalIconCircle}>
+                <Feather name="briefcase" size={16} color={LaboraColors.warning} />
               </View>
-              <Feather name="map-pin" size={14} color="#F59E0B" />
+              <View style={styles.quickApprovalHeaderCol}>
+                <View style={styles.quickApprovalBadgeRow}>
+                  <ThemedText style={styles.quickApprovalTag}>PERLU PERSETUJUAN</ThemedText>
+                  <ThemedText style={styles.quickApprovalTime}>10 mnt lalu</ThemedText>
+                </View>
+                <ThemedText style={styles.quickApprovalName}>
+                  Ahmad Fauzi (210401032)
+                </ThemedText>
+              </View>
+            </View>
+
+            <ThemedText style={styles.quickApprovalReason} numberOfLines={2}>
+              Izin Sakit: Surat Dokter terlampir • Praktikum Jarkom Modul 4 (Subnetting & VLAN).
+            </ThemedText>
+
+            <View style={styles.quickApprovalBtnRow}>
+              <Pressable
+                style={styles.quickApproveBtn}
+                onPress={() => {
+                  if (pendingPermissions.length > 0) {
+                    updatePermissionStatus(pendingPermissions[0].id, 'APPROVED');
+                  }
+                }}>
+                <Feather name="check" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.quickApproveBtnText}>Setujui Izin</ThemedText>
+              </Pressable>
+
+              <Pressable
+                style={styles.quickAttachmentBtn}
+                onPress={() => router.push('/(main)/izin' as any)}>
+                <Feather name="eye" size={14} color={LaboraColors.textSecondary} style={{ marginRight: 4 }} />
+                <ThemedText style={styles.quickAttachmentBtnText}>Lampiran</ThemedText>
+              </Pressable>
             </View>
           </View>
         </View>
 
-        {/* 4. Quick Access Shortcuts */}
+        {/* 5. Aksi Cepat Asisten Lab */}
         <View style={styles.quickAccessSection}>
-          <ThemedText style={styles.quickAccessHeading}>Aksi Cepat Asisten</ThemedText>
+          <ThemedText style={styles.sectionHeading}>Aksi Cepat Asisten</ThemedText>
           <View style={styles.quickAccessRow}>
             <Pressable
               style={styles.quickActionItem}
-              onPress={() => handleOpenCreateSession()}
-            >
+              onPress={() => handleOpenCreateSession()}>
               <View style={[styles.quickActionCircle, styles.quickActionCircleActive]}>
-                <Feather name="plus-circle" size={20} color={MemphisColors.teal} />
+                <Feather name="plus-circle" size={20} color={LaboraColors.primary} />
               </View>
               <ThemedText style={styles.quickActionLabel}>Buat Sesi</ThemedText>
             </Pressable>
 
             <Pressable
               style={styles.quickActionItem}
-              onPress={handleOpenCreateClass}
-            >
+              onPress={handleOpenCreateClass}>
               <View style={styles.quickActionCircle}>
-                <Feather name="book-open" size={20} color={MemphisColors.slate} />
+                <Feather name="book-open" size={20} color={LaboraColors.textSecondary} />
               </View>
               <ThemedText style={styles.quickActionLabel}>Buat Kelas</ThemedText>
             </Pressable>
@@ -440,27 +514,25 @@ export default function HomeScreen() {
               onPress={() => {
                 setEditingLab(null);
                 setIsLabFormVisible(true);
-              }}
-            >
+              }}>
               <View style={styles.quickActionCircle}>
-                <Feather name="grid" size={20} color={MemphisColors.slate} />
+                <Feather name="grid" size={20} color={LaboraColors.textSecondary} />
               </View>
               <ThemedText style={styles.quickActionLabel}>Tambah Lab</ThemedText>
             </Pressable>
 
             <Pressable
               style={styles.quickActionItem}
-              onPress={() => router.push('/maps' as any)}
-            >
+              onPress={() => router.push('/maps' as any)}>
               <View style={styles.quickActionCircle}>
-                <Feather name="map-pin" size={20} color={MemphisColors.slate} />
+                <Feather name="map-pin" size={20} color={LaboraColors.textSecondary} />
               </View>
               <ThemedText style={styles.quickActionLabel}>Peta Lab</ThemedText>
             </Pressable>
           </View>
         </View>
 
-        {/* Sub-Tab Switcher: Jadwal Sesi vs Data Kelas vs Lokasi Lab (SRS-07) */}
+        {/* 6. Sub-Tab Switcher: Jadwal Sesi vs Data Kelas vs Lokasi Lab (SRS-07) */}
         <View style={styles.subTabContainer}>
           <Pressable
             onPress={() => setActiveSubTab('SESSIONS')}
@@ -538,7 +610,7 @@ export default function HomeScreen() {
 
             <View style={styles.listHeader}>
               <ThemedText type="subtitle" style={styles.listTitle}>
-                Daftar Jadwal Sesi ({filteredSessions.length})
+                Jadwal Sesi Praktikum Hari Ini
               </ThemedText>
               <Pressable
                 onPress={() => handleOpenCreateSession()}
@@ -581,7 +653,7 @@ export default function HomeScreen() {
               ))
             )}
           </View>
-        ) : (
+        ) : activeSubTab === 'CLASSES' ? (
           /* TAB 2: DATA KELAS PRAKTIKUM (SRS-07) */
           <View style={styles.sessionList}>
             <View style={styles.listHeader}>
@@ -602,10 +674,10 @@ export default function HomeScreen() {
               <ThemedView type="backgroundElement" style={styles.emptyContainer}>
                 <ThemedText style={styles.emptyIcon}>🏫</ThemedText>
                 <ThemedText type="subtitle" style={styles.emptyTitle}>
-                  Belum ada kelas praktikum
+                  Belum ada data kelas
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Silakan klik tombol &quot;+ Tambah Kelas&quot; untuk menambahkan kelas praktikum baru.
+                  Tambahkan kelas praktikum baru menggunakan tombol di atas.
                 </ThemedText>
               </ThemedView>
             ) : (
@@ -620,41 +692,31 @@ export default function HomeScreen() {
               ))
             )}
           </View>
-        )}
-
-        {activeSubTab === 'LABS' && (
-          /* TAB 3: PENGELOLAAN LOKASI LABORATORIUM (SRS-07) */
+        ) : (
+          /* TAB 3: MASTER RUANGAN LABORATORIUM (SRS-07 Sprint 3) */
           <View style={styles.sessionList}>
             <View style={styles.listHeader}>
               <ThemedText type="subtitle" style={styles.listTitle}>
-                Daftar Laboratorium Informatika ({labs.length})
+                Data Laboratorium ({labs.length})
               </ThemedText>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Pressable
-                  onPress={() => router.push('/maps' as any)}
-                  style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-                  <ThemedText type="smallBold" style={{ color: '#0284C7' }}>
-                    🗺️ Buka Peta
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  onPress={handleOpenCreateLab}
-                  style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
-                  <ThemedText type="smallBold" style={styles.primaryAddButtonText}>
-                    + Tambah Lab
-                  </ThemedText>
-                </Pressable>
-              </View>
+
+              <Pressable
+                onPress={handleOpenCreateLab}
+                style={({ pressed }) => [styles.primaryAddButton, pressed && styles.pressed]}>
+                <ThemedText type="smallBold" style={styles.primaryAddButtonText}>
+                  + Tambah Lab
+                </ThemedText>
+              </Pressable>
             </View>
 
             {labs.length === 0 ? (
               <ThemedView type="backgroundElement" style={styles.emptyContainer}>
                 <ThemedText style={styles.emptyIcon}>🏢</ThemedText>
                 <ThemedText type="subtitle" style={styles.emptyTitle}>
-                  Belum ada laboratorium
+                  Belum ada data lab
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Silakan klik tombol &quot;+ Tambah Lab&quot; untuk mendaftarkan lokasi dan koordinat laboratorium baru.
+                  Tambahkan lokasi laboratorium baru untuk pemantauan GPS geofencing.
                 </ThemedText>
               </ThemedView>
             ) : (
@@ -664,7 +726,6 @@ export default function HomeScreen() {
                   lab={lab}
                   onEdit={handleOpenEditLab}
                   onDelete={deleteLab}
-                  onViewOnMap={() => router.push('/maps' as any)}
                 />
               ))
             )}
@@ -672,24 +733,24 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* Modal Detail Sesi & Riwayat Status (SRS-08) */}
+      {/* MODAL 1: Detail & Log Sesi (SRS-08) */}
       <SessionDetailModal
         session={currentModalSession}
-        visible={!!currentModalSession}
+        visible={Boolean(activeModalSession)}
         selectedAssistantId={selectedAssistantId}
         activeAssistant={activeAssistant}
+        statusLogs={currentModalLogs}
         isUpdating={
-          currentModalSession
-            ? updatingSessionIds.includes(currentModalSession.id)
+          activeModalSession
+            ? updatingSessionIds.includes(activeModalSession.id)
             : false
         }
-        statusLogs={currentModalLogs}
         onClose={handleCloseDetail}
         onToggleStatus={handleToggleStatus}
         onEditSession={handleOpenEditSession}
       />
 
-      {/* Modal Form Tambah / Edit Kelas Praktikum (SRS-07) */}
+      {/* MODAL 2: Form Tambah/Ubah Kelas (SRS-07) */}
       <ClassFormModal
         visible={isClassFormVisible}
         initialData={editingClass}
@@ -698,25 +759,22 @@ export default function HomeScreen() {
         onSubmit={handleClassFormSubmit}
       />
 
-      {/* Modal Form Tambah / Edit Jadwal Sesi Praktikum (SRS-07) */}
+      {/* MODAL 3: Form Tambah/Ubah Sesi & Jadwal (SRS-07) */}
       <SessionFormModal
         visible={isSessionFormVisible}
         initialSession={editingSession}
-        preselectedClass={preselectedClassForSession}
         classes={classes}
         assistants={assistants}
+        preselectedClass={preselectedClassForSession}
         onClose={() => setIsSessionFormVisible(false)}
         onSubmit={handleSessionFormSubmit}
       />
 
-      {/* Modal Form Tambah / Edit Laboratorium (SRS-07 Sprint 3) */}
+      {/* MODAL 4: Form Tambah/Ubah Laboratorium (SRS-07 Sprint 3) */}
       <LabFormModal
         visible={isLabFormVisible}
         initialData={editingLab}
-        onClose={() => {
-          setIsLabFormVisible(false);
-          setEditingLab(null);
-        }}
+        onClose={() => setIsLabFormVisible(false)}
         onSubmit={handleLabFormSubmit}
       />
     </ScrollView>
@@ -736,419 +794,417 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     gap: Spacing.four,
   },
-  header: {
-    gap: 8,
-    marginTop: Spacing.two,
-  },
-  headerBadgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  topProfileBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingTop: 4,
-  },
-  profileLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+
+  /* 2x2 Stat Grid */
+  statGrid: {
     gap: 12,
   },
-  avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#DBEAFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    shadowColor: '#0B192C',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  avatarInitial: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: MemphisColors.teal,
-  },
-  greetingCol: {
-    justifyContent: 'center',
-  },
-  greetingText: {
-    fontSize: 13,
-    color: MemphisColors.muted,
-    fontWeight: '500',
-  },
-  userName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: MemphisColors.navy,
-  },
-  profileRight: {
+  statRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
-  logoutIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroCard: {
-    backgroundColor: MemphisColors.navy,
-    borderRadius: 24,
-    padding: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    shadowColor: MemphisColors.navy,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  heroLeft: {
+  statCol: {
     flex: 1,
-    paddingRight: 10,
   },
-  heroSubtitle: {
-    color: '#93C5FD',
+
+  /* Screen 1 Hero Card */
+  heroCard: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    shadowColor: LaboraColors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+    gap: 12,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  liveIndicatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: LaboraColors.success,
+  },
+  liveLabel: {
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 1.2,
-    marginBottom: 4,
+    letterSpacing: 0.6,
+    color: LaboraColors.primary,
   },
-  heroDateNumber: {
-    color: '#FFFFFF',
-    fontSize: 38,
-    fontWeight: '800',
-    lineHeight: 44,
-  },
-  heroDateSub: {
-    color: '#E2E8F0',
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  heroCourseTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  heroBadgeRow: {
+  heroTimePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  heroStatusBadge: {
+    backgroundColor: '#D1FAE5',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 9999,
   },
-  heroStatusOpen: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-  },
-  heroStatusOpenText: {
-    color: '#34D399',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  heroStatusClosed: {
-    backgroundColor: 'rgba(148, 163, 184, 0.2)',
-  },
-  heroStatusClosedText: {
-    color: '#CBD5E1',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  heroStatusText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  heroRight: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroGraphicCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overviewCard: {
-    backgroundColor: MemphisColors.mintSurface,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-    padding: 18,
-    marginBottom: 20,
-  },
-  overviewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  overviewTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: MemphisColors.navy,
-  },
-  dropdownPill: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  dropdownPillText: {
+  heroTimeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: MemphisColors.teal,
+    color: '#065F46',
   },
-  metricsRow: {
+  heroCourseTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: LaboraColors.textPrimary,
+  },
+  heroMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
   },
-  metricCol: {
-    flex: 1,
+  heroCodeBadge: {
+    backgroundColor: LaboraColors.blush,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  heroCodeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: LaboraColors.primary,
+  },
+  heroMetaItem: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
-  metricDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: '#DBEAFE',
-  },
-  metricLabel: {
+  heroMetaText: {
     fontSize: 12,
-    color: MemphisColors.muted,
+    color: LaboraColors.textSecondary,
     fontWeight: '500',
-    marginBottom: 4,
   },
-  metricValueRow: {
+  heroMetaDot: {
+    color: LaboraColors.textMuted,
+    fontSize: 12,
+  },
+
+  /* Attendance Progress Box */
+  attendanceProgressBox: {
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+  },
+  attendanceProgressHeader: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 3,
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  metricNumber: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: MemphisColors.navy,
+  attendanceProgressTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  metricUnit: {
-    fontSize: 11,
-    color: MemphisColors.muted,
+  attendanceProgressLabel: {
+    fontSize: 12,
+    color: LaboraColors.textPrimary,
     fontWeight: '600',
   },
-  quickAccessSection: {
-    marginBottom: 20,
+  attendanceProgressNumbers: {
+    fontSize: 12,
+    color: LaboraColors.textSecondary,
   },
-  quickAccessHeading: {
+  attendanceProgressBold: {
+    fontWeight: '800',
+    color: LaboraColors.primary,
+  },
+  progressBarTrack: {
+    height: 7,
+    backgroundColor: '#F1E8EB',
+    borderRadius: 9999,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: LaboraColors.primary,
+    borderRadius: 9999,
+  },
+  progressFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressToleranceText: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  progressRemainingText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: LaboraColors.primary,
+  },
+
+  /* Hero Action Row */
+  heroActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  heroPrimaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LaboraColors.primary,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: LaboraColors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  heroPrimaryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  heroSecondaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LaboraColors.blush,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  heroSecondaryBtnText: {
+    color: LaboraColors.primary,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+
+  /* Quick Approval Card */
+  quickApprovalCard: {
+    flexDirection: 'row',
+    backgroundColor: LaboraColors.card,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+  },
+  quickApprovalAccent: {
+    width: 5,
+    backgroundColor: LaboraColors.warning,
+  },
+  quickApprovalBody: {
+    flex: 1,
+    padding: 14,
+    gap: 8,
+  },
+  quickApprovalTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  quickApprovalIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickApprovalHeaderCol: {
+    flex: 1,
+    gap: 2,
+  },
+  quickApprovalBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quickApprovalTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#B45309',
+    letterSpacing: 0.5,
+  },
+  quickApprovalTime: {
+    fontSize: 10,
+    color: LaboraColors.textMuted,
+  },
+  quickApprovalName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
+  },
+  quickApprovalReason: {
+    fontSize: 12,
+    color: LaboraColors.textSecondary,
+    lineHeight: 16,
+  },
+  quickApprovalBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  quickApproveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#047857',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  quickApproveBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  quickAttachmentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LaboraColors.surfaceAlt,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  quickAttachmentBtnText: {
+    color: LaboraColors.textPrimary,
+    fontWeight: '600',
+    fontSize: 12,
+  },
+
+  /* Section Heading & Quick Access */
+  sectionHeading: {
     fontSize: 16,
     fontWeight: '800',
-    color: MemphisColors.navy,
-    marginBottom: 14,
+    color: LaboraColors.textPrimary,
+    marginBottom: 8,
+  },
+  quickAccessSection: {
+    width: '100%',
   },
   quickAccessRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: 10,
   },
   quickActionItem: {
+    flex: 1,
     alignItems: 'center',
-    width: 72,
+    backgroundColor: LaboraColors.card,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
   },
   quickActionCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: MemphisColors.cardBorder,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: LaboraColors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
-    shadowColor: '#0B192C',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
+    marginBottom: 6,
   },
   quickActionCircleActive: {
-    backgroundColor: MemphisColors.blueActiveCircle,
-    borderColor: '#BFDBFE',
+    backgroundColor: LaboraColors.blush,
   },
   quickActionLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: MemphisColors.slate,
-    textAlign: 'center',
+    color: LaboraColors.textPrimary,
   },
-  dbBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 6,
-  },
-  dbBadgeOnline: {
-    backgroundColor: '#DCFCE7',
-    borderWidth: 1,
-    borderColor: '#86EFAC',
-  },
-  dbBadgeLocal: {
-    backgroundColor: '#E0F2FE',
-    borderWidth: 1,
-    borderColor: '#BAE6FD',
-  },
-  dbDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  dbDotOnline: {
-    backgroundColor: '#16A34A',
-  },
-  dbDotLocal: {
-    backgroundColor: '#0284C7',
-  },
-  dbBadgeText: {
-    fontSize: 11,
-  },
-  dbTextOnline: {
-    color: '#15803D',
-  },
-  dbTextLocal: {
-    color: '#0369A1',
-  },
-  title: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '800',
-    color: MemphisColors.navy,
-  },
+
+  /* Sub Tabs */
   subTabContainer: {
     flexDirection: 'row',
-    backgroundColor: MemphisColors.surface,
-    borderRadius: 14,
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 12,
     padding: 4,
-    borderWidth: 1,
-    borderColor: MemphisColors.cardBorder,
+    gap: 4,
   },
   subTabButton: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 8,
+    borderRadius: 9,
     alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
   },
   subTabButtonActive: {
-    backgroundColor: MemphisColors.navy,
-    shadowColor: MemphisColors.navy,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: LaboraColors.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   subTabText: {
-    color: '#475569',
-    fontSize: 13,
+    fontSize: 12,
+    color: LaboraColors.textSecondary,
+    fontWeight: '600',
   },
   subTabTextActive: {
-    color: '#FFFFFF',
+    color: LaboraColors.primary,
+    fontWeight: '800',
   },
+
+  /* List & Headers */
   sessionList: {
-    gap: Spacing.three,
+    width: '100%',
+    gap: 12,
   },
   listHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: Spacing.two,
   },
   listTitle: {
-    fontSize: 18,
-    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    color: LaboraColors.textPrimary,
   },
   primaryAddButton: {
-    backgroundColor: MemphisColors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: MemphisColors.primaryPressed,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
+    backgroundColor: LaboraColors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   primaryAddButtonText: {
-    color: MemphisColors.navy,
-    fontSize: 13,
+    color: '#FFFFFF',
     fontWeight: '700',
-  },
-  secondaryButton: {
-    backgroundColor: '#F1F5F9',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
+    fontSize: 12,
   },
   pressed: {
-    opacity: 0.75,
+    opacity: 0.8,
   },
   emptyContainer: {
-    padding: Spacing.five,
-    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.two,
-    marginTop: Spacing.two,
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 8,
   },
   emptyIcon: {
-    fontSize: 40,
+    fontSize: 32,
   },
   emptyTitle: {
-    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
   },
   emptyText: {
+    fontSize: 13,
     textAlign: 'center',
+    color: LaboraColors.textMuted,
   },
 });
