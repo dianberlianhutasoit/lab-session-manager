@@ -60,6 +60,14 @@
           "icon": "./assets/images/icon.png",
           "color": "#208AEF"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "2.4.0"
+          }
+        }
       ]
     ],
     "experiments": {
@@ -73,9 +81,9 @@
         }
       },
       "eas": {
-        "projectId": "fb9d9dcc-34e4-4651-af03-d5fe83f166bd"
+        "projectId": "067c0cdc-c653-4b51-b4cf-382d079d67c6"
       }
     },
-    "owner": "akbarrmw"
+    "owner": "ppk-praktikum"
   }
 }

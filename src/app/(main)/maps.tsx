@@ -5,6 +5,7 @@ import {
   Pressable,
   Platform,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -343,6 +344,29 @@ export default function MapsScreen() {
               >
                 <ThemedText style={styles.fabIcon}>🔄</ThemedText>
               </Pressable>
+
+              {/* Tombol Rute Eksternal Google Maps jika Lab Dipilih */}
+              {selectedLab ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.fab,
+                    { backgroundColor: '#0284C7' },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                  onPress={() => {
+                    const originParam = userLocation
+                      ? `&origin=${userLocation.latitude},${userLocation.longitude}`
+                      : '';
+                    Linking.openURL(
+                      `https://www.google.com/maps/dir/?api=1${originParam}&destination=${selectedLab.latitude},${selectedLab.longitude}&destination_place_id=${encodeURIComponent(
+                        selectedLab.name
+                      )}`
+                    );
+                  }}
+                >
+                  <ThemedText style={[styles.fabIcon, { color: '#FFFFFF' }]}>🧭</ThemedText>
+                </Pressable>
+              ) : null}
             </View>
 
             {/* Bottom Activity Sheet ketika Marker Dipilih (SRS-10) */}

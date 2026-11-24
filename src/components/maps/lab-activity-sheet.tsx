@@ -4,12 +4,15 @@ import {
   StyleSheet,
   Pressable,
   Platform,
+  Linking,
+  Alert,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import type { Lab, Schedule, Session, User } from '@/types';
 import type { UserCoordinates } from '@/hooks/use-location';
-import { Spacing } from '@/constants/theme';
+import { Spacing, LaboraColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/context/auth-context';
 
@@ -79,6 +82,24 @@ export function LabActivitySheet({
     ? assistants.find((a) => a.id === activity.ongoing?.session.assistantId)
     : null;
 
+  // Buka rute turn-by-turn di aplikasi Google Maps eksternal
+  const handleOpenGoogleMapsRoute = () => {
+    const originParam = userLocation
+      ? `&origin=${userLocation.latitude},${userLocation.longitude}`
+      : '';
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1${originParam}&destination=${lab.latitude},${lab.longitude}&destination_place_id=${encodeURIComponent(
+      lab.name
+    )}`;
+
+    Linking.openURL(mapsUrl).catch(() => {
+      Alert.alert(
+        'Buka Google Maps',
+        `Menampilkan koordinat Lab: ${lab.latitude}, ${lab.longitude}`,
+        [{ text: 'OK' }]
+      );
+    });
+  };
+
   return (
     <ThemedView
       style={[
@@ -133,6 +154,19 @@ export function LabActivitySheet({
           </ThemedText>
         </View>
       ) : null}
+
+      {/* Navigation Buttons: Buka Rute Google Maps */}
+      <View style={styles.routeActionRow}>
+        <Pressable
+          style={styles.openMapsBtn}
+          onPress={handleOpenGoogleMapsRoute}
+        >
+          <Feather name="navigation" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+          <ThemedText style={styles.openMapsBtnText}>
+            Lihat Rute ke Lab di Google Maps
+          </ThemedText>
+        </Pressable>
+      </View>
 
       {/* Sesi Berlangsung (Ongoing Activity) */}
       <View style={styles.section}>
@@ -420,5 +454,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     alignItems: 'center',
+  },
+  routeActionRow: {
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  openMapsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LaboraColors.primary,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  openMapsBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });
