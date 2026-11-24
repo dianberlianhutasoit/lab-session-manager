@@ -16,12 +16,12 @@ yarn-debug.*
 yarn-error.*
 .DS_Store
 *.pem
-.env
-.env.*
-!.env.example
 *.tsbuildinfo
 example
 /ios
 /android
-google-services.json
+
+# Environment & Firebase config included for EAS build archive (still ignored by git)
+!.env
+!google-services.json
 *-firebase-adminsdk-*.json
