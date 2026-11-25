@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import MapView, { PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Region, Polyline } from 'react-native-maps';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -21,7 +21,7 @@ import { UserMarker } from '@/components/maps/user-marker';
 import { LabActivitySheet } from '@/components/maps/lab-activity-sheet';
 import { MapFallbackList } from '@/components/maps/map-fallback-list';
 import { LabFormModal } from '@/components/asisten/lab-form-modal';
-import { Spacing } from '@/constants/theme';
+import { Spacing, LaboraColors } from '@/constants/theme';
 
 export default function MapsScreen() {
   const insets = useSafeAreaInsets();
@@ -129,17 +129,30 @@ export default function MapsScreen() {
   const handleSelectLab = useCallback((lab: Lab) => {
     setSelectedLab(lab);
     if (Platform.OS !== 'web' && viewMode === 'map') {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: lab.latitude - 0.001, // Sedikit offset agar tidak tertutup bottom sheet
-          longitude: lab.longitude,
-          latitudeDelta: 0.004,
-          longitudeDelta: 0.004,
-        },
-        600
-      );
+      if (userLocation) {
+        mapRef.current?.fitToCoordinates(
+          [
+            { latitude: userLocation.latitude, longitude: userLocation.longitude },
+            { latitude: lab.latitude, longitude: lab.longitude },
+          ],
+          {
+            edgePadding: { top: 80, right: 60, bottom: 240, left: 60 },
+            animated: true,
+          }
+        );
+      } else {
+        mapRef.current?.animateToRegion(
+          {
+            latitude: lab.latitude - 0.001, // Sedikit offset agar tidak tertutup bottom sheet
+            longitude: lab.longitude,
+            latitudeDelta: 0.004,
+            longitudeDelta: 0.004,
+          },
+          600
+        );
+      }
     }
-  }, [viewMode]);
+  }, [userLocation, viewMode]);
 
   const handleNavigateToPresensi = (sessionId: string) => {
     router.push({
@@ -301,6 +314,19 @@ export default function MapsScreen() {
 
               {/* Marker Posisi Pengguna Real-time (SRS-09) */}
               {userLocation ? <UserMarker location={userLocation} /> : null}
+
+              {/* Rute Navigasi Visual In-App (Polyline) dari User ke Lab */}
+              {selectedLab && userLocation ? (
+                <Polyline
+                  coordinates={[
+                    { latitude: userLocation.latitude, longitude: userLocation.longitude },
+                    { latitude: selectedLab.latitude, longitude: selectedLab.longitude },
+                  ]}
+                  strokeColor={LaboraColors.primary}
+                  strokeWidth={3}
+                  lineDashPattern={[6, 4]}
+                />
+              ) : null}
             </MapView>
 
             {/* Floating Action Buttons */}
