@@ -78,6 +78,13 @@ export function LabActivitySheet({
 
   const isWithinRadius = distance !== null ? distance <= lab.radius : null;
 
+  const walkMinutes = distance !== null ? Math.max(1, Math.ceil(distance / 75)) : null;
+  const formattedDistance = distance !== null
+    ? distance >= 1000
+      ? `${(distance / 1000).toFixed(1)} km`
+      : `${distance} m`
+    : null;
+
   const ongoingAssistant = activity.ongoing
     ? assistants.find((a) => a.id === activity.ongoing?.session.assistantId)
     : null;
@@ -135,6 +142,33 @@ export function LabActivitySheet({
           <ThemedText type="smallBold" style={styles.closeBtnText}>✕</ThemedText>
         </Pressable>
       </View>
+
+      {/* Route & Distance Guidance Card (SRS-03, SRS-10) */}
+      {distance !== null ? (
+        <View style={styles.routeSummaryCard}>
+          <View style={styles.routeMetricsRow}>
+            <View style={styles.routeMetricItem}>
+              <Feather name="navigation" size={14} color={LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Jarak Tempuh</ThemedText>
+              <ThemedText style={styles.routeMetricValue}>{formattedDistance}</ThemedText>
+            </View>
+            <View style={styles.routeMetricDivider} />
+            <View style={styles.routeMetricItem}>
+              <Feather name="clock" size={14} color={LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Estimasi Jalan</ThemedText>
+              <ThemedText style={styles.routeMetricValue}>~{walkMinutes} mnt</ThemedText>
+            </View>
+            <View style={styles.routeMetricDivider} />
+            <View style={styles.routeMetricItem}>
+              <Feather name="shield" size={14} color={isWithinRadius ? '#15803D' : LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Geofence</ThemedText>
+              <ThemedText style={[styles.routeMetricValue, { color: isWithinRadius ? '#15803D' : '#B45309' }]}>
+                {isWithinRadius ? 'Dalam Lab' : 'Luar Radius'}
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {/* Info Status Jarak (SRS-03 & SRS-10) */}
       {distance !== null ? (
@@ -454,6 +488,39 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     alignItems: 'center',
+  },
+  routeSummaryCard: {
+    backgroundColor: '#FAF5F7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F0E2E7',
+    padding: 10,
+    marginBottom: 8,
+  },
+  routeMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  routeMetricItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeMetricLabel: {
+    fontSize: 10,
+    color: LaboraColors.textSecondary,
+    marginTop: 2,
+  },
+  routeMetricValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
+    marginTop: 1,
+  },
+  routeMetricDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E5D6DC',
   },
   routeActionRow: {
     marginTop: 8,

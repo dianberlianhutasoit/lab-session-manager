@@ -1,5 +1,10 @@
-import React, { useMemo } from "react";
+import { CircularGauge } from "@/components/labora/CircularGauge";
+import { LaboraColors, MaxContentWidth, Spacing } from "@/constants/theme";
+import { useAuth } from "@/context/auth-context";
+import { useSessionContext } from "@/context/session-context";
+import { Feather } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
+import { useMemo } from "react";
 import {
   FlatList,
   SafeAreaView,
@@ -8,11 +13,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Feather } from "@expo/vector-icons";
-import { useSessionContext } from "@/context/session-context";
-import { useAuth } from "@/context/auth-context";
-import { LaboraColors, Spacing, MaxContentWidth } from "@/constants/theme";
-import { CircularGauge } from "@/components/labora/CircularGauge";
 
 export default function PraktikanRiwayatScreen() {
   const router = useRouter();
@@ -37,12 +37,18 @@ export default function PraktikanRiwayatScreen() {
     return permissions.filter((p) => p.userId === practitioner?.id);
   }, [permissions, practitioner?.id]);
 
-  const tepatWaktuCount = Math.max(15, myAttendance.length);
-  const terlambatCount = 1;
-  const izinCount = Math.max(1, myPermissions.length);
-  const alpaCount = 0;
+  const hadirCount = myAttendance.length;
+  const izinCount = myPermissions.length;
+  const totalSessions = sessions.length;
+  const tepatWaktuCount = hadirCount;
+  const terlambatCount = 0;
+  const alpaCount = Math.max(0, totalSessions - (hadirCount + izinCount));
 
-  const attendanceRate = 94.2;
+  const attendanceRate = totalSessions > 0
+    ? Math.min(100, Math.round(((hadirCount + izinCount) / totalSessions) * 1000) / 10)
+    : (hadirCount > 0 ? 100 : 0);
+
+  const isUasEligible = attendanceRate >= 80;
 
   const filteredHistory = myAttendance;
 
@@ -99,9 +105,11 @@ export default function PraktikanRiwayatScreen() {
                   />
                   <Text style={styles.gaugeNumberText}>{attendanceRate}%</Text>
                   <Text style={styles.gaugeSubText}>Tingkat Kehadiran</Text>
-                  <View style={styles.uasEligiblePill}>
-                    <Feather name="shield" size={11} color="#047857" style={{ marginRight: 4 }} />
-                    <Text style={styles.uasEligibleText}>Memenuhi Syarat UAS</Text>
+                  <View style={[styles.uasEligiblePill, !isUasEligible && { backgroundColor: '#FEE2E2', borderColor: '#FECACA' }]}>
+                    <Feather name={isUasEligible ? "shield" : "alert-circle"} size={11} color={isUasEligible ? "#047857" : "#DC2626"} style={{ marginRight: 4 }} />
+                    <Text style={[styles.uasEligibleText, !isUasEligible && { color: "#DC2626" }]}>
+                      {isUasEligible ? "Memenuhi Syarat UAS" : "Belum Memenuhi Syarat (Min. 80%)"}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -149,7 +157,7 @@ export default function PraktikanRiwayatScreen() {
             <View style={styles.timelineHeaderRow}>
               <Text style={styles.timelineSectionTitle}>LOG PRESENSI TERKINI</Text>
               <Text style={styles.timelineCountText}>
-                {filteredHistory.length > 0 ? `${filteredHistory.length} Log` : "3 Log Tercatat"}
+                {filteredHistory.length} Log Tercatat
               </Text>
             </View>
           </View>
@@ -189,7 +197,11 @@ export default function PraktikanRiwayatScreen() {
               <View style={styles.timelineFooterRow}>
                 <View style={styles.gpsDistanceBadge}>
                   <Feather name="navigation" size={11} color={LaboraColors.primary} />
-                  <Text style={styles.gpsDistanceText}>Presisi GPS: 8.4m</Text>
+                  <Text style={styles.gpsDistanceText}>
+                    {item.record.distanceMeters !== undefined
+                      ? `Presisi GPS: ${item.record.distanceMeters}m`
+                      : `Verifikasi: ${item.record.method ?? "GPS"}`}
+                  </Text>
                 </View>
 
                 <View style={styles.onTimeBadge}>

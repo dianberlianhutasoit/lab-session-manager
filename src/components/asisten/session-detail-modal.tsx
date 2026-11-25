@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Modal,
   Pressable,
@@ -12,6 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing, LaboraColors } from '@/constants/theme';
 import type { SessionWithDetails } from '@/context/session-context';
+import { useSessionContext } from '@/context/session-context';
 import type { SessionStatusLog, User } from '@/types';
 import { confirmSessionStatusChange } from './session-card';
 import { SessionQRModal } from './session-qr-modal';
@@ -39,10 +40,143 @@ export function SessionDetailModal({
   onToggleStatus,
   onEditSession,
 }: SessionDetailModalProps) {
+  const { users, permissions, getSessionAttendanceRecords } = useSessionContext();
   const [showQRModal, setShowQRModal] = useState(false);
   const [allowManualGps, setAllowManualGps] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'HADIR' | 'BELUM' | 'IZIN'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const sessionRecords = useMemo(() => {
+    return session ? getSessionAttendanceRecords(session.id) : [];
+  }, [session, getSessionAttendanceRecords]);
+
+  const sessionPermissions = useMemo(() => {
+    return session ? permissions.filter((p) => p.sessionId === session.id) : [];
+  }, [session, permissions]);
+
+  const practitionerUsers = useMemo(() => {
+    return users.filter((u) => u.role === 'praktikan');
+  }, [users]);
+
+  // Combine into a full student list with real live data
+  const dynamicStudentList = useMemo(() => {
+    const list: {
+      id: string;
+      initial: string;
+      name: string;
+      nim: string;
+      status: 'TEPAT_WAKTU' | 'HADIR' | 'IZIN' | 'BELUM' | 'LUAR_RADIUS';
+      time?: string;
+      radius?: string;
+      isWithin: boolean;
+      attachment?: string;
+    }[] = [];
+
+    // 1. Add students who have recorded attendance
+    sessionRecords.forEach((record) => {
+      const user = users.find((u) => u.id === record.userId);
+      const name = record.userName || user?.name || 'Mahasiswa';
+      const nim = user?.nim || '2110511000';
+      const isWithin = (record.distanceMeters ?? 0) <= 30;
+      const initial = name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
+
+      let formattedTime = '-';
+      try {
+        const d = new Date(record.recordedAt);
+        formattedTime = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+      } catch {
+        formattedTime = '-';
+      }
+
+      list.push({
+        id: record.id,
+        initial: initial || 'M',
+        name,
+        nim,
+        status: !isWithin ? 'LUAR_RADIUS' : 'HADIR',
+        time: formattedTime,
+        radius: record.distanceMeters !== undefined ? `${record.distanceMeters} meter` : 'GPS Verified',
+        isWithin,
+      });
+    });
+
+    // 2. Add students with permissions for this session
+    sessionPermissions.forEach((perm) => {
+      const user = users.find((u) => u.id === perm.userId);
+      const name = user?.name || 'Mahasiswa';
+      const nim = user?.nim || '2110511000';
+      // Avoid duplicate if already added
+      if (list.some((item) => item.id === perm.id || item.nim === nim)) return;
+
+      const initial = name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
+
+      list.push({
+        id: perm.id,
+        initial: initial || 'M',
+        name,
+        nim,
+        status: 'IZIN',
+        attachment: perm.reason || 'Izin Praktikum',
+        isWithin: false,
+      });
+    });
+
+    // 3. Add remaining registered practitioners who haven't attended yet
+    practitionerUsers.forEach((stu) => {
+      const alreadyIncluded = list.some(
+        (item) => item.name.toLowerCase() === stu.name.toLowerCase() || (stu.nim && item.nim === stu.nim)
+      );
+      if (!alreadyIncluded) {
+        const initial = stu.name
+          .split(' ')
+          .map((n) => n[0])
+          .slice(0, 2)
+          .join('')
+          .toUpperCase();
+
+        list.push({
+          id: stu.id,
+          initial: initial || 'M',
+          name: stu.name,
+          nim: stu.nim || '2110511000',
+          status: 'BELUM',
+          isWithin: false,
+        });
+      }
+    });
+
+    return list;
+  }, [sessionRecords, sessionPermissions, practitionerUsers, users]);
+
+  const totalCount = dynamicStudentList.length;
+  const hadirCount = dynamicStudentList.filter((s) => s.status === 'HADIR' || s.status === 'TEPAT_WAKTU' || s.status === 'LUAR_RADIUS').length;
+  const izinCount = dynamicStudentList.filter((s) => s.status === 'IZIN').length;
+  const belumCount = dynamicStudentList.filter((s) => s.status === 'BELUM').length;
+  const tingkatHadirPct = totalCount > 0 ? Math.round(((hadirCount + izinCount) / totalCount) * 1000) / 10 : 0;
+
+  const filteredStudentList = useMemo(() => {
+    return dynamicStudentList.filter((stu) => {
+      if (selectedFilter === 'HADIR' && stu.status !== 'HADIR' && stu.status !== 'TEPAT_WAKTU' && stu.status !== 'LUAR_RADIUS') return false;
+      if (selectedFilter === 'IZIN' && stu.status !== 'IZIN') return false;
+      if (selectedFilter === 'BELUM' && stu.status !== 'BELUM') return false;
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return stu.name.toLowerCase().includes(q) || stu.nim.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [dynamicStudentList, selectedFilter, searchQuery]);
 
   if (!session) return null;
 
@@ -50,7 +184,6 @@ export function SessionDetailModal({
     schedule,
     assistant,
     status,
-    attendanceCount,
   } = session;
   const isOpen = status === 'OPEN';
 
@@ -62,48 +195,6 @@ export function SessionDetailModal({
       onConfirm: () => onToggleStatus(session.id),
     });
   };
-
-  // Sample student list for Screen 2 presentation
-  const studentList = [
-    {
-      id: '1',
-      initial: 'AR',
-      name: 'Aditya Rizky Ramadhan',
-      nim: '2110511042',
-      status: 'TEPAT_WAKTU',
-      time: '09:34 WIB',
-      radius: '8.4 meter',
-      isWithin: true,
-    },
-    {
-      id: '2',
-      initial: 'BS',
-      name: 'Bella Safitri',
-      nim: '2110511055',
-      status: 'HADIR',
-      time: '09:41 WIB',
-      radius: '14.2 meter',
-      isWithin: true,
-    },
-    {
-      id: '3',
-      initial: 'DS',
-      name: 'Dimas Satria',
-      nim: '2110511068',
-      status: 'IZIN',
-      attachment: 'Surat Tugas Lomba UI/UX Lab',
-      isWithin: false,
-    },
-    {
-      id: '4',
-      initial: 'EP',
-      name: 'Eko Prasetyo',
-      nim: '2110511079',
-      status: 'LUAR_RADIUS',
-      radius: '420m (Kantin Barat)',
-      isWithin: false,
-    },
-  ];
 
   return (
     <Modal
@@ -211,11 +302,11 @@ export function SessionDetailModal({
             <View style={styles.summaryCard}>
               <View style={styles.summaryHeaderRow}>
                 <ThemedText style={styles.summaryHeading}>Ringkasan Kehadiran</ThemedText>
-                <ThemedText style={styles.summaryTotalText}>Total: 32 Praktikan</ThemedText>
+                <ThemedText style={styles.summaryTotalText}>Total: {totalCount} Praktikan</ThemedText>
               </View>
 
               <View style={styles.rateRow}>
-                <ThemedText style={styles.rateNumber}>86.7%</ThemedText>
+                <ThemedText style={styles.rateNumber}>{tingkatHadirPct}%</ThemedText>
                 <ThemedText style={styles.rateLabel}>Tingkat Hadir</ThemedText>
                 <View style={styles.targetBadge}>
                   <ThemedText style={styles.targetBadgeText}>Target Lab ≥ 80%</ThemedText>
@@ -224,25 +315,27 @@ export function SessionDetailModal({
 
               {/* Progress bar */}
               <View style={styles.progressBarTrack}>
-                <View style={[styles.progressBarFill, { width: '86.7%' }]} />
+                <View style={[styles.progressBarFill, { width: `${Math.min(100, tingkatHadirPct)}%` }]} />
               </View>
 
               {/* 4 Mini boxes */}
               <View style={styles.fourBoxGrid}>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>{attendanceCount > 0 ? attendanceCount : 26}</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{hadirCount}</ThemedText>
                   <ThemedText style={styles.statBoxLabel}>Hadir</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>4</ThemedText>
-                  <ThemedText style={styles.statBoxLabel}>Belum / Telat</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{belumCount}</ThemedText>
+                  <ThemedText style={styles.statBoxLabel}>Belum Presensi</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>2</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{izinCount}</ThemedText>
                   <ThemedText style={styles.statBoxLabel}>Izin Sah</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>0</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>
+                    {sessionPermissions.filter((p) => p.category === 'SAKIT').length}
+                  </ThemedText>
                   <ThemedText style={styles.statBoxLabel}>Sakit</ThemedText>
                 </View>
               </View>
@@ -266,28 +359,28 @@ export function SessionDetailModal({
                 onPress={() => setSelectedFilter('ALL')}
                 style={[styles.filterPill, selectedFilter === 'ALL' && styles.filterPillActive]}>
                 <ThemedText style={[styles.filterPillText, selectedFilter === 'ALL' && styles.filterPillTextActive]}>
-                  Semua (32)
+                  Semua ({totalCount})
                 </ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setSelectedFilter('HADIR')}
                 style={[styles.filterPill, selectedFilter === 'HADIR' && styles.filterPillActive]}>
                 <ThemedText style={[styles.filterPillText, selectedFilter === 'HADIR' && styles.filterPillTextActive]}>
-                  Hadir (26)
+                  Hadir ({hadirCount})
                 </ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setSelectedFilter('BELUM')}
                 style={[styles.filterPill, selectedFilter === 'BELUM' && styles.filterPillActive]}>
                 <ThemedText style={[styles.filterPillText, selectedFilter === 'BELUM' && styles.filterPillTextActive]}>
-                  Belum Presensi (4)
+                  Belum ({belumCount})
                 </ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setSelectedFilter('IZIN')}
                 style={[styles.filterPill, selectedFilter === 'IZIN' && styles.filterPillActive]}>
                 <ThemedText style={[styles.filterPillText, selectedFilter === 'IZIN' && styles.filterPillTextActive]}>
-                  Izin (2)
+                  Izin ({izinCount})
                 </ThemedText>
               </Pressable>
             </View>
@@ -296,10 +389,19 @@ export function SessionDetailModal({
             <View style={styles.studentListSection}>
               <View style={styles.listHeaderRow}>
                 <ThemedText style={styles.listSectionTitle}>DAFTAR KEHADIRAN GPS</ThemedText>
-                <ThemedText style={styles.listSortTitle}>Diurutkan waktu presensi</ThemedText>
+                <ThemedText style={styles.listSortTitle}>Tersinkronisasi Real-time</ThemedText>
               </View>
 
-              {studentList.map((stu) => (
+              {filteredStudentList.length === 0 ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Feather name="inbox" size={32} color={LaboraColors.textMuted} style={{ marginBottom: 8 }} />
+                  <ThemedText style={{ fontSize: 13, color: LaboraColors.textMuted }}>
+                    Tidak ada data praktikan yang sesuai filter.
+                  </ThemedText>
+                </View>
+              ) : null}
+
+              {filteredStudentList.map((stu) => (
                 <View key={stu.id} style={styles.studentCard}>
                   <View style={styles.studentTopRow}>
                     <View style={styles.studentAvatar}>
@@ -316,7 +418,9 @@ export function SessionDetailModal({
                           ? styles.statusHadir
                           : stu.status === 'IZIN'
                             ? styles.statusIzin
-                            : styles.statusWarn,
+                            : stu.status === 'BELUM'
+                              ? styles.statusBelum
+                              : styles.statusWarn,
                       ]}>
                       <ThemedText
                         style={[
@@ -325,15 +429,19 @@ export function SessionDetailModal({
                             ? styles.statusHadirText
                             : stu.status === 'IZIN'
                               ? styles.statusIzinText
-                              : styles.statusWarnText,
+                              : stu.status === 'BELUM'
+                                ? styles.statusBelumText
+                                : styles.statusWarnText,
                         ]}>
                         {stu.status === 'TEPAT_WAKTU'
                           ? '✓ Tepat Waktu'
                           : stu.status === 'HADIR'
                             ? '✓ Hadir'
                             : stu.status === 'IZIN'
-                              ? 'Izin - Disetujui'
-                              : 'Luar Geofence'}
+                              ? 'Izin'
+                              : stu.status === 'BELUM'
+                                ? 'Belum Presensi'
+                                : 'Luar Geofence'}
                       </ThemedText>
                     </View>
                   </View>
@@ -342,7 +450,13 @@ export function SessionDetailModal({
                     <View style={styles.attachmentProofRow}>
                       <Feather name="file-text" size={13} color={LaboraColors.primary} />
                       <ThemedText style={styles.attachmentProofText}>{stu.attachment}</ThemedText>
-                      <ThemedText style={styles.seeProofLink}>Lihat Bukti</ThemedText>
+                    </View>
+                  ) : stu.status === 'BELUM' ? (
+                    <View style={styles.studentBottomRow}>
+                      <View style={styles.timeMeta}>
+                        <Feather name="clock" size={12} color={LaboraColors.textMuted} />
+                        <ThemedText style={styles.timeMetaText}>Menunggu verifikasi presensi</ThemedText>
+                      </View>
                     </View>
                   ) : (
                     <View style={styles.studentBottomRow}>
@@ -805,6 +919,14 @@ const styles = StyleSheet.create({
   },
   statusWarnText: {
     color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  statusBelum: {
+    backgroundColor: '#F1F5F9',
+  },
+  statusBelumText: {
+    color: '#64748B',
     fontSize: 10,
     fontWeight: '700',
   },

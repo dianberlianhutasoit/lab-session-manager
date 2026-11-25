@@ -15,6 +15,7 @@ export interface User {
   name: string;
   email: string;
   role: Role;
+  nim?: string;
   expoPushToken?: string | null;
 }
 
