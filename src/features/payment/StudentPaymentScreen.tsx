@@ -14,8 +14,10 @@ import { StatusBar } from 'expo-status-bar';
 import { Feather } from '@expo/vector-icons';
 
 import { LaboraColors, MaxContentWidth, Radii, Spacing } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { FineCard, formatRupiah } from '@/features/payment/components/FineCard';
 import { PaymentHistoryCard } from '@/features/payment/components/PaymentHistoryCard';
+import { chargeFinePayment, openMidtransSnap } from '@/features/payment/payment-api';
 import type {
   FineWithSession,
   PaymentScreenTab,
@@ -35,6 +37,7 @@ export default function StudentPaymentScreen({
   onSelectPayment,
 }: StudentPaymentScreenProps) {
   const router = useRouter();
+  const { profile } = useAuth();
   const {
     activeFines,
     paymentHistory,
@@ -46,17 +49,34 @@ export default function StudentPaymentScreen({
   } = useStudentPayments();
 
   const [activeTab, setActiveTab] = useState<PaymentScreenTab>(initialTab);
+  const [payingFineId, setPayingFineId] = useState<string | null>(null);
 
-  const handlePayPress = (fine: FineWithSession) => {
+  const handlePayPress = async (fine: FineWithSession) => {
     if (onPayFine) {
       onPayFine(fine);
       return;
     }
-    Alert.alert(
-      'Pembayaran Midtrans',
-      `Tagihan ${formatRupiah(fine.amount)} untuk ${fine.sessionTitle} siap dibayar melalui Midtrans Sandbox.`,
-      [{ text: 'Mengerti' }],
-    );
+
+    if (!profile?.id) {
+      Alert.alert('Sesi Berakhir', 'Silakan login kembali untuk melakukan pembayaran.');
+      return;
+    }
+
+    setPayingFineId(fine.id);
+    try {
+      const result = await chargeFinePayment({
+        fineId: fine.id,
+        studentId: profile.id,
+      });
+      await openMidtransSnap(result.redirectUrl);
+      await refresh();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Gagal membuka halaman pembayaran Midtrans.';
+      Alert.alert('Pembayaran Gagal', message);
+    } finally {
+      setPayingFineId(null);
+    }
   };
 
   return (
@@ -142,7 +162,11 @@ export default function StudentPaymentScreen({
             data={activeFines}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <FineCard fine={item} onPayPress={handlePayPress} />
+              <FineCard
+                fine={item}
+                onPayPress={(selectedFine) => void handlePayPress(selectedFine)}
+                isPaying={payingFineId === item.id}
+              />
             )}
             refreshing={refreshing}
             onRefresh={() => void refresh()}
