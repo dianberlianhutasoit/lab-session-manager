@@ -41,15 +41,19 @@ export const COLLECTIONS = {
   SESSIONS: "sessions",
   STATUS_LOGS: "session_status_logs",
   ATTENDANCE: "attendance",
+  ATTENDANCES: "attendances",
   LEAVE_REQUESTS: "leave_requests",
   USERS: "users",
   LABS: "labs",
+  COURSES: "courses",
+  LAB_MEMBERS: "labMembers",
+  FINES: "fines",
 } as const;
 
 /**
  * Menghapus properti bernilai undefined agar aman dikirim ke Firestore
  */
-function stripUndefined<T extends Record<string, any>>(
+export function stripUndefined<T extends Record<string, any>>(
   obj: T,
 ): Record<string, any> {
   const cleaned: Record<string, any> = {};

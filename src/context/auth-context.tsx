@@ -10,7 +10,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 import { firebaseAuth, firestore } from '@/services/firebase';
 import { registerForPushNotificationsAsync } from '@/services/notification-service';
-import type { Role, User } from '@/types';
+import { isValidAppRole } from '@/features/asprak/role-utils';
+import type { User } from '@/types';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'authenticated' | 'needsProfile' | 'profileError';
 
@@ -26,8 +27,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function isRole(value: unknown): value is Role {
-  return value === 'praktikan' || value === 'asisten';
+function isRole(value: unknown) {
+  return isValidAppRole(value);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

@@ -4,6 +4,7 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import AppTabs from '@/components/app-tabs';
 import { useAuth } from '@/context/auth-context';
 import { MemphisColors } from '@/constants/theme';
+import { isStaffRole, isValidAppRole } from '@/features/asprak/role-utils';
 
 export default function MainLayout() {
   const { status, profile, error, logout } = useAuth();
@@ -37,7 +38,7 @@ export default function MainLayout() {
     );
   }
 
-  if (profile.role !== 'praktikan' && profile.role !== 'asisten') {
+  if (!isValidAppRole(profile.role)) {
     return (
       <View style={styles.state}>
         <Text style={styles.title}>Akses belum tersedia</Text>
@@ -58,7 +59,7 @@ export default function MainLayout() {
   }
 
   if (
-    profile.role === 'asisten' &&
+    isStaffRole(profile.role) &&
     (pathname === '/praktikan' || pathname.startsWith('/praktikan/'))
   ) {
     return <Redirect href={'/' as Href} />;

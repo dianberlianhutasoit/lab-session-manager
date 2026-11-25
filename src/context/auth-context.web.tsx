@@ -1,4 +1,5 @@
 import { users as dummyUsers } from '@/data/dummy';
+import { isValidAppRole } from '@/features/asprak/role-utils';
 import type { Role, User } from '@/types';
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
@@ -17,8 +18,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const STORAGE_KEY = 'lab_session_web_auth_user';
 
-function isRole(value: unknown): value is Role {
-  return value === 'praktikan' || value === 'asisten';
+function isRole(value: unknown) {
+  return isValidAppRole(value);
 }
 
 function getInitialWebUser(): User | null {

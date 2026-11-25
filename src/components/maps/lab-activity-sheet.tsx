@@ -15,6 +15,7 @@ import type { UserCoordinates } from '@/hooks/use-location';
 import { Spacing, LaboraColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/context/auth-context';
+import { isStaffRole } from '@/features/asprak/role-utils';
 
 export interface LabActivityData {
   ongoing: { session: Session; schedule: Schedule } | null;
@@ -64,7 +65,7 @@ export function LabActivitySheet({
 }: LabActivitySheetProps) {
   const theme = useTheme();
   const { profile } = useAuth();
-  const isAssistant = profile?.role === 'asisten';
+  const isAssistant = isStaffRole(profile?.role);
 
   // Hitung jarak perangkat ke laboratorium jika koordinat tersedia
   const distance = userLocation

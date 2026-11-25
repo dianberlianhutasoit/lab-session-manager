@@ -14,17 +14,19 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 import { useAuth } from '@/context/auth-context';
+import { isStaffRole } from '@/features/asprak/role-utils';
 
 export default function AppTabs() {
   const { profile } = useAuth();
+  const isStaff = isStaffRole(profile?.role);
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          {profile?.role === 'asisten' && <TabTrigger name="home" href="/" asChild><TabButton>Sesi Lab</TabButton></TabTrigger>}
+          {isStaff && <TabTrigger name="home" href="/" asChild><TabButton>Sesi Lab</TabButton></TabTrigger>}
           {profile?.role === 'praktikan' && <TabTrigger name="praktikan" href="/praktikan" asChild><TabButton>Jadwal Praktikum</TabButton></TabTrigger>}
-          {profile?.role === 'asisten' && <TabTrigger name="explore" href="/explore" asChild><TabButton>Rekap Presensi</TabButton></TabTrigger>}
+          {isStaff && <TabTrigger name="explore" href="/explore" asChild><TabButton>Rekap Presensi</TabButton></TabTrigger>}
         </CustomTabList>
       </TabList>
     </Tabs>

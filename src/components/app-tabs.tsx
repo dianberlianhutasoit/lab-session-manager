@@ -3,18 +3,20 @@ import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { isStaffRole } from '@/features/asprak/role-utils';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
   const { profile } = useAuth();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const isStaff = isStaffRole(profile?.role);
 
   return (
     <NativeTabs
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
-      {profile?.role === 'asisten' && <NativeTabs.Trigger name="index">
+      {isStaff && <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Sesi Lab</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/home.png')}
@@ -30,7 +32,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>}
 
-      {profile?.role === 'asisten' && <NativeTabs.Trigger name="explore">
+      {isStaff && <NativeTabs.Trigger name="explore">
         <NativeTabs.Trigger.Label>Rekap Presensi</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}

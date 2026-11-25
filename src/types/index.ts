@@ -1,4 +1,4 @@
-export type Role = "praktikan" | "asisten";
+export type Role = "praktikan" | "asisten" | "asprak" | "aslab";
 
 export type SessionStatus = "OPEN" | "CLOSED";
 
@@ -33,6 +33,7 @@ export interface Lab {
   capacity?: number;
   description?: string;
   isActive?: boolean;
+  attendanceConfig?: LabAttendanceConfig;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -90,8 +91,14 @@ export interface Schedule {
 export interface Session {
   id: string;
   classId?: string;
+  labId?: string;
+  courseId?: string;
+  asprakId?: string;
   scheduleId: string;
   assistantId: string;
+  startAt?: string;
+  endAt?: string;
+  configSnapshot?: SessionConfigSnapshot;
   status: SessionStatus;
   openedAt?: string;
   closedAt?: string;
@@ -251,4 +258,102 @@ export interface SessionScheduleFormInput {
   room: string;
   assistantId: string;
   status?: SessionStatus;
+}
+
+// ==========================================
+// SPRINT 4 FROZEN SCHEMA CONTRACTS
+// ==========================================
+
+export type Sprint4Role = "aslab" | "asprak" | "praktikan";
+
+export type Sprint4SessionStatus = "SCHEDULED" | "OPEN" | "CLOSED";
+
+export type AttendanceCheckInStatus = "PRESENT" | "EXCUSED" | "ABSENT";
+
+export type FineStatus = "unpaid" | "pending" | "paid" | "waived";
+
+export interface LabAttendanceConfig {
+  gracePeriodMinutes: number;
+  lateFineAmount: number;
+}
+
+export interface SessionConfigSnapshot {
+  gracePeriodMinutes: number;
+  lateFineAmount: number;
+}
+
+export interface UserDoc {
+  uid: string;
+  name: string;
+  email: string;
+  role: Sprint4Role;
+  nim?: string;
+  createdAt: string;
+}
+
+export interface CourseDoc {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface LabDoc {
+  id: string;
+  courseId: string;
+  name: string;
+  aslabId: string;
+  location: {
+    name: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+  };
+  radiusMeters: number;
+  attendanceConfig: LabAttendanceConfig;
+}
+
+export interface LabMemberDoc {
+  id: string;
+  labId: string;
+  userId: string;
+  role: "praktikan" | "asprak";
+  assignedAt: string;
+}
+
+export interface SessionDoc {
+  id: string;
+  labId: string;
+  courseId: string;
+  asprakId: string;
+  title: string;
+  sessionNumber: number;
+  startAt: string;
+  endAt: string;
+  status: Sprint4SessionStatus;
+  openedAt?: string;
+  closedAt?: string;
+  configSnapshot: SessionConfigSnapshot;
+}
+
+export interface AttendanceDoc {
+  id: string;
+  sessionId: string;
+  labId: string;
+  studentId: string;
+  status: AttendanceCheckInStatus;
+  checkedInAt: string;
+  isLate: boolean;
+  lateMinutes: number;
+}
+
+export interface FineDoc {
+  id: string;
+  studentId: string;
+  sessionId: string;
+  labId: string;
+  amount: number;
+  reason: string;
+  status: FineStatus;
+  createdAt: string;
+  paidAt?: string;
 }
