@@ -5,7 +5,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
+  useState
 } from 'react';
 
 import type { LabClassWithDetails } from "@/components/asisten/class-card";
@@ -16,7 +16,6 @@ import {
   validateLabRadius,
 } from "@/constants/lab-location";
 import { useAuth } from "@/context/auth-context";
-import { sendPushNotification } from "@/services/notification-service";
 import {
   attendance as initialAttendance,
   classes as initialClasses,
@@ -28,6 +27,31 @@ import {
   statusLogs as initialStatusLogs,
   users as initialUsers,
 } from '@/data/dummy';
+import { isAsprakRole } from "@/features/asprak/role-utils";
+import {
+  buildSessionAttendanceRoster,
+  isAsprakAssignedToSession,
+  type SessionRosterItem,
+} from "@/features/asprak/asprak-dashboard-helpers";
+import {
+  resolveSessionConfigSnapshotOptional,
+  resolveSessionStartAt,
+} from "@/features/asprak/services/session-snapshot-helpers";
+import { firestoreOpenSessionWithSnapshot } from "@/features/asprak/services/session-snapshot-service";
+import { buildAttendanceId, buildFineId } from "@/features/presensi/fine-rules";
+import {
+  sprint4SeedCourses,
+  sprint4SeedFines,
+  sprint4SeedLabMembers,
+} from "@/features/presensi/seed-sprint4";
+import {
+  prepareCheckInWithFine,
+  prepareLeaveApprovalEffects,
+} from "@/features/presensi/services/attendance-fine-helpers";
+import {
+  firestoreCheckInWithFineTransaction,
+  firestoreReviewLeaveAndWaiveFineTransaction,
+} from "@/features/presensi/services/attendance-fine-service";
 import {
   COLLECTIONS,
   firestoreBatchCloseSessions,
@@ -38,7 +62,6 @@ import {
   firestoreDeleteLab,
   firestoreDeleteSessionAndSchedule,
   firestoreRecordAttendance,
-  firestoreReviewLeaveRequest,
   firestoreSubmitLeaveRequest,
   firestoreUpdateClass,
   firestoreUpdateLab,
@@ -47,14 +70,19 @@ import {
   seedInitialFirestoreDataIfEmpty,
   subscribeToCollection,
 } from '@/services/firestore-service';
+import { sendPushNotification } from "@/services/notification-service";
 import type {
   Attendance,
+  AttendanceDoc,
   AttendanceLocationPayload,
   AttendanceRecord,
+  CourseDoc,
+  FineDoc,
   Lab,
   LabClass,
   LabClassFormInput,
   LabFormInput,
+  LabMemberDoc,
   LeaveCategory,
   LeaveRequest,
   LeaveStatus,
@@ -162,6 +190,18 @@ interface SessionContextValue {
     ongoing: { session: Session; schedule: Schedule } | null;
     next: { session: Session; schedule: Schedule } | null;
   };
+  // Sprint 4 Dev B: Presensi terlambat, configSnapshot sesi, tagihan denda real-time & read-only master
+  attendances: AttendanceDoc[];
+  fines: FineDoc[];
+  courses: CourseDoc[];
+  labMembers: LabMemberDoc[];
+  actionError: string | null;
+  clearActionError: () => void;
+  getCourseById: (courseId?: string) => CourseDoc | undefined;
+  getSessionAttendanceDocs: (sessionId: string) => AttendanceDoc[];
+  getSessionFines: (sessionId: string) => FineDoc[];
+  getStudentFineForSession: (sessionId: string, studentId: string) => FineDoc | undefined;
+  getSessionRoster: (sessionId: string) => SessionRosterItem[];
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -176,6 +216,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const [attendances, setAttendances] = useState<AttendanceDoc[]>([]);
+  const [fines, setFines] = useState<FineDoc[]>(() =>
+    isFirebaseConfigured ? [] : sprint4SeedFines
+  );
+  const [courses, setCourses] = useState<CourseDoc[]>(() =>
+    isFirebaseConfigured ? [] : sprint4SeedCourses
+  );
+  const [labMembers, setLabMembers] = useState<LabMemberDoc[]>(() =>
+    isFirebaseConfigured ? [] : sprint4SeedLabMembers
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
   const [labs, setLabs] = useState<Lab[]>(initialLabs);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
   const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
@@ -196,7 +247,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!profile) return;
     Promise.resolve().then(() => {
-      if (profile.role === 'asisten') {
+      if (isAsprakRole(profile.role)) {
         setCurrentAssistantId(profile.id);
       } else if (profile.role === 'praktikan') {
         setCurrentStudentId(profile.id);
@@ -309,6 +360,46 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    const handleListenerError = (err: Error) => {
+      setError(err.message);
+    };
+
+    const unsubAttendances = subscribeToCollection<AttendanceDoc>(
+      COLLECTIONS.ATTENDANCES,
+      (items) => {
+        setAttendances(items);
+        markRealtimeSync();
+      },
+      handleListenerError
+    );
+
+    const unsubFines = subscribeToCollection<FineDoc>(
+      COLLECTIONS.FINES,
+      (items) => {
+        setFines(items);
+        markRealtimeSync();
+      },
+      handleListenerError
+    );
+
+    const unsubCourses = subscribeToCollection<CourseDoc>(
+      COLLECTIONS.COURSES,
+      (items) => {
+        setCourses(items);
+        markRealtimeSync();
+      },
+      handleListenerError
+    );
+
+    const unsubLabMembers = subscribeToCollection<LabMemberDoc>(
+      COLLECTIONS.LAB_MEMBERS,
+      (items) => {
+        setLabMembers(items);
+        markRealtimeSync();
+      },
+      handleListenerError
+    );
+
     return () => {
       isMounted = false;
       unsubClasses?.();
@@ -319,6 +410,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubLeaves?.();
       unsubUsers?.();
       unsubLabs?.();
+      unsubAttendances?.();
+      unsubFines?.();
+      unsubCourses?.();
+      unsubLabMembers?.();
     };
   }, [markRealtimeSync]);
 
@@ -630,14 +725,52 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const existing = sessions.find((s) => s.id === sessionId);
       if (!existing || existing.status === targetStatus) return false;
 
+      setActionError(null);
+
+      if (
+        profile &&
+        isAsprakRole(profile.role) &&
+        !isAsprakAssignedToSession(existing, profile.id)
+      ) {
+        setActionError(
+          'Anda tidak memiliki kewenangan untuk membuka atau menutup sesi milik Asprak lain.'
+        );
+        return false;
+      }
+
       const now = new Date().toISOString();
       const effectiveActorId =
         actorAssistantId && actorAssistantId !== 'ALL'
           ? actorAssistantId
-          : existing.assistantId || currentAssistantId;
+          : existing.asprakId || existing.assistantId || currentAssistantId;
 
       const actorUser = users.find((u) => u.id === effectiveActorId);
-      const isSubstitute = effectiveActorId !== existing.assistantId;
+      const isSubstitute = effectiveActorId !== (existing.asprakId || existing.assistantId);
+      const relatedSchedule = schedules.find((sch) => sch.id === existing.scheduleId);
+      const matchingLab = existing.labId
+        ? labs.find((l) => l.id === existing.labId)
+        : findLabForRoom(labs, relatedSchedule?.room);
+      const resolvedLabId = matchingLab?.id ?? existing.labId;
+
+      let resolvedSnapshot = existing.configSnapshot;
+      if (targetStatus === 'OPEN') {
+        const optionalSnapshot = resolveSessionConfigSnapshotOptional(
+          matchingLab,
+          existing.configSnapshot
+        );
+        if (!isFirebaseConfigured && !optionalSnapshot) {
+          setActionError(
+            'Konfigurasi toleransi keterlambatan (gracePeriodMinutes) dan nominal denda (lateFineAmount) laboratorium belum diatur oleh Aslab.'
+          );
+          return false;
+        }
+        resolvedSnapshot = optionalSnapshot ?? existing.configSnapshot;
+      }
+
+      const resolvedStartAt =
+        targetStatus === 'OPEN'
+          ? resolveSessionStartAt(existing, relatedSchedule, now)
+          : existing.startAt;
 
       const metadata = {
         openedAt: targetStatus === 'OPEN' ? now : existing.openedAt,
@@ -667,6 +800,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
               ...s,
               status: targetStatus,
               ...metadata,
+              labId: resolvedLabId,
+              startAt: resolvedStartAt,
+              configSnapshot: resolvedSnapshot,
               updatedAt: now,
             }
             : s
@@ -677,7 +813,31 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       try {
         if (isFirebaseConfigured) {
-          await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
+          if (targetStatus === 'OPEN') {
+            const openResult = await firestoreOpenSessionWithSnapshot({
+              sessionId,
+              labId: resolvedLabId,
+              startAtFallback: resolvedStartAt,
+              openedAt: now,
+              actorId: effectiveActorId,
+              statusLog: newLog,
+              configFallback: resolvedSnapshot ?? null,
+            });
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.id === sessionId
+                  ? {
+                    ...s,
+                    configSnapshot: openResult.configSnapshot,
+                    startAt: openResult.startAt,
+                    labId: openResult.labId ?? s.labId,
+                  }
+                  : s
+              )
+            );
+          } else {
+            await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
+          }
         }
 
         // SRS-15: Push notification broadcast ke seluruh praktikan saat sesi dibuka
@@ -734,7 +894,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
         return true;
       } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Gagal memperbarui status sesi praktikum.';
         console.warn('[SessionContext] Gagal memperbarui status sesi, rollback:', err);
+        setActionError(message);
         setSessions((prev) =>
           prev.map((s) => (s.id === sessionId ? existing : s))
         );
@@ -744,7 +909,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
       }
     },
-    [sessions, schedules, classes, users, currentAssistantId, markRealtimeSync],
+    [sessions, schedules, classes, labs, users, profile, currentAssistantId, markRealtimeSync],
   );
 
   const openSession = useCallback(
@@ -958,18 +1123,67 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         ...attendanceLocation,
       };
 
+      const relatedSchedule = schedules.find((item) => item.id === targetSession.scheduleId);
+      const matchingLab = targetSession.labId
+        ? labs.find((l) => l.id === targetSession.labId)
+        : findLabForRoom(labs, relatedSchedule?.room);
+      const resolvedLabId = matchingLab?.id ?? targetSession.labId ?? 'lab-default';
+      const resolvedConfig = resolveSessionConfigSnapshotOptional(
+        matchingLab,
+        targetSession.configSnapshot
+      );
+      const resolvedStartAt = resolveSessionStartAt(
+        targetSession,
+        relatedSchedule,
+        recordedAt
+      );
+      const existingFine = fines.find((f) => f.id === buildFineId(sessionId, userId));
+      const preparedSprint4 = resolvedConfig
+        ? prepareCheckInWithFine({
+            sessionId,
+            studentId: userId,
+            labId: resolvedLabId,
+            sessionStartAt: resolvedStartAt,
+            checkedInAt: recordedAt,
+            configSnapshot: resolvedConfig,
+            existingFine,
+          })
+        : null;
+
       if (isFirebaseConfigured) {
         await firestoreRecordAttendance(newRecord);
+        if (resolvedConfig) {
+          await firestoreCheckInWithFineTransaction({
+            sessionId,
+            studentId: userId,
+            labId: resolvedLabId,
+            checkedInAt: recordedAt,
+            startAtFallback: resolvedStartAt,
+            configFallback: resolvedConfig,
+          });
+        }
       }
 
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
+      if (preparedSprint4) {
+        setAttendances((prev) => {
+          const filtered = prev.filter((a) => a.id !== preparedSprint4.attendanceDoc.id);
+          return [...filtered, preparedSprint4.attendanceDoc];
+        });
+        if (preparedSprint4.fineDoc) {
+          const newFine = preparedSprint4.fineDoc;
+          setFines((prev) =>
+            prev.some((f) => f.id === newFine.id) ? prev : [newFine, ...prev]
+          );
+        }
+      }
       markRealtimeSync();
 
       return true;
     },
-    [sessions, schedules, labs, markRealtimeSync],
+    [sessions, schedules, labs, fines, markRealtimeSync],
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -983,12 +1197,32 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const existing = leaveRequests.find((l) => l.id === requestId);
       if (!existing) return false;
 
+      setActionError(null);
+
+      if (existing.status !== 'PENDING') {
+        setActionError(`Permintaan izin ini sudah diproses (${existing.status}).`);
+        return false;
+      }
+
       const now = new Date().toISOString();
       const sessionOfRequest = sessions.find((s) => s.id === existing.sessionId);
+
+      if (
+        profile &&
+        isAsprakRole(profile.role) &&
+        sessionOfRequest &&
+        !isAsprakAssignedToSession(sessionOfRequest, profile.id)
+      ) {
+        setActionError(
+          'Anda tidak memiliki kewenangan untuk meninjau permohonan izin pada sesi milik Asprak lain.'
+        );
+        return false;
+      }
+
       const effectiveActorId =
         actorAssistantId && actorAssistantId !== 'ALL'
           ? actorAssistantId
-          : sessionOfRequest?.assistantId || currentAssistantId;
+          : sessionOfRequest?.asprakId || sessionOfRequest?.assistantId || currentAssistantId;
 
       const reviewerUser = users.find((u) => u.id === effectiveActorId);
       const trimmedNote = reviewerNote?.trim() || undefined;
@@ -999,6 +1233,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         reviewedAt: now,
         reviewerNote: trimmedNote,
       };
+
+      const relatedSchedule = schedules.find((sch) => sch.id === sessionOfRequest?.scheduleId);
+      const matchingLab = sessionOfRequest?.labId
+        ? labs.find((l) => l.id === sessionOfRequest.labId)
+        : findLabForRoom(labs, relatedSchedule?.room);
+      const resolvedLabId = matchingLab?.id ?? sessionOfRequest?.labId ?? 'lab-default';
+
+      const previousAttendancesSnapshot = attendances;
+      const previousFinesSnapshot = fines;
 
       setReviewingLeaveIds((prev) =>
         prev.includes(requestId) ? prev : [...prev, requestId]
@@ -1025,11 +1268,45 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             : item
         )
       );
+
+      if (decision === 'APPROVED') {
+        const detId = buildAttendanceId(existing.sessionId, existing.userId);
+        const existingAtt = attendances.find((a) => a.id === detId) ?? null;
+        const existingFine = fines.find((f) => f.id === buildFineId(existing.sessionId, existing.userId)) ?? null;
+        const effects = prepareLeaveApprovalEffects({
+          sessionId: existing.sessionId,
+          studentId: existing.userId,
+          labId: resolvedLabId,
+          reviewedAt: now,
+          existingAttendance: existingAtt,
+          existingFine,
+        });
+
+        setAttendances((prev) => {
+          const filtered = prev.filter((a) => a.id !== effects.excusedAttendance.id);
+          return [...filtered, effects.excusedAttendance];
+        });
+
+        if (effects.fineWaiver?.allowed) {
+          const waivedFine = effects.fineWaiver.fine;
+          setFines((prev) =>
+            prev.map((f) => (f.id === waivedFine.id ? waivedFine : f))
+          );
+        }
+      }
+
       markRealtimeSync();
 
       try {
         if (isFirebaseConfigured) {
-          await firestoreReviewLeaveRequest(requestId, decision, metadata);
+          await firestoreReviewLeaveAndWaiveFineTransaction({
+            requestId,
+            decision,
+            sessionId: existing.sessionId,
+            studentId: existing.userId,
+            labId: resolvedLabId,
+            metadata,
+          });
         }
 
         // SRS-16: Notifikasi ke praktikan bersangkutan saat izin disetujui / ditolak
@@ -1081,16 +1358,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
         return true;
       } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Gagal memproses keputusan izin praktikan.';
         console.warn('[SessionContext] Gagal memperbarui keputusan izin, rollback:', err);
+        setActionError(message);
         setLeaveRequests((prev) =>
           prev.map((item) => (item.id === requestId ? existing : item))
         );
+        setAttendances(previousAttendancesSnapshot);
+        setFines(previousFinesSnapshot);
         return false;
       } finally {
         setReviewingLeaveIds((prev) => prev.filter((id) => id !== requestId));
       }
     },
-    [leaveRequests, sessions, schedules, users, currentAssistantId, markRealtimeSync]
+    [leaveRequests, sessions, schedules, labs, attendances, fines, users, profile, currentAssistantId, markRealtimeSync]
   );
 
   const getSessionLeaveRequests = useCallback(
@@ -1415,6 +1699,54 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [labs, schedules, sessions]
   );
 
+  const clearActionError = useCallback(() => {
+    setActionError(null);
+  }, []);
+
+  const getCourseById = useCallback(
+    (courseId?: string): CourseDoc | undefined =>
+      courseId ? courses.find((c) => c.id === courseId) : undefined,
+    [courses]
+  );
+
+  const getSessionAttendanceDocs = useCallback(
+    (sessionId: string): AttendanceDoc[] =>
+      attendances.filter((item) => item.sessionId === sessionId),
+    [attendances]
+  );
+
+  const getSessionFines = useCallback(
+    (sessionId: string): FineDoc[] =>
+      fines.filter((item) => item.sessionId === sessionId),
+    [fines]
+  );
+
+  const getStudentFineForSession = useCallback(
+    (sessionId: string, studentId: string): FineDoc | undefined => {
+      const fineId = buildFineId(sessionId, studentId);
+      return fines.find((item) => item.id === fineId);
+    },
+    [fines]
+  );
+
+  const getSessionRoster = useCallback(
+    (sessionId: string): SessionRosterItem[] => {
+      const targetSession = sessions.find((s) => s.id === sessionId);
+      if (!targetSession) return [];
+      const legacyRecords = getSessionAttendanceRecords(sessionId);
+      return buildSessionAttendanceRoster({
+        session: targetSession,
+        attendanceDocs: attendances,
+        legacyRecords,
+        fines,
+        users,
+        leaveRequests,
+        labMembers,
+      });
+    },
+    [sessions, getSessionAttendanceRecords, attendances, fines, users, leaveRequests, labMembers]
+  );
+
   const value = useMemo(
     () => ({
       classes,
@@ -1424,6 +1756,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       updatingSessionIds,
       users,
       attendance,
+      attendances,
+      fines,
+      courses,
+      labMembers,
+      actionError,
+      clearActionError,
       leaveRequests,
       reviewingLeaveIds,
       lastRealtimeSyncAt,
@@ -1431,7 +1769,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       isFirestoreConnected,
-      currentAssistantId: profile?.role === 'asisten' ? profile.id : currentAssistantId,
+      currentAssistantId: isAsprakRole(profile?.role) ? profile!.id : currentAssistantId,
       setCurrentAssistantId,
       createClass,
       updateClass,
@@ -1449,12 +1787,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       reviewLeaveRequest,
       getSessionLeaveRequests,
       getClassById,
+      getCourseById,
       getScheduleById,
       getAssistantById,
       getAttendanceCount,
       getClassesWithDetails,
       getSessionsWithDetails,
       getSessionAttendanceRecords,
+      getSessionAttendanceDocs,
+      getSessionFines,
+      getStudentFineForSession,
+      getSessionRoster,
       getPractitioners,
       permissions,
       currentStudentId: profile?.role === 'praktikan' ? profile.id : currentStudentId,
@@ -1477,6 +1820,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       updatingSessionIds,
       users,
       attendance,
+      attendances,
+      fines,
+      courses,
+      labMembers,
+      actionError,
+      clearActionError,
       leaveRequests,
       reviewingLeaveIds,
       lastRealtimeSyncAt,
@@ -1502,12 +1851,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       reviewLeaveRequest,
       getSessionLeaveRequests,
       getClassById,
+      getCourseById,
       getScheduleById,
       getAssistantById,
       getAttendanceCount,
       getClassesWithDetails,
       getSessionsWithDetails,
       getSessionAttendanceRecords,
+      getSessionAttendanceDocs,
+      getSessionFines,
+      getStudentFineForSession,
+      getSessionRoster,
       getPractitioners,
       permissions,
       currentStudentId,
