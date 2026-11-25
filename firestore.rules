@@ -22,12 +22,27 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Memeriksa apakah pengguna memiliki role 'asisten'
-    function isAssistant() {
+    // Memeriksa apakah pengguna memiliki role 'aslab' (Asisten Laboratorium)
+    function isAslab() {
       return isAuthenticated() && (
+        request.auth.token.role == 'aslab' ||
+        getUserData().role == 'aslab'
+      );
+    }
+
+    // Memeriksa apakah pengguna memiliki role 'asprak' atau legacy 'asisten'
+    function isAsprak() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'asprak' ||
         request.auth.token.role == 'asisten' ||
+        getUserData().role == 'asprak' ||
         getUserData().role == 'asisten'
       );
+    }
+
+    // Memeriksa apakah pengguna memiliki hak pengelola (Asprak, Aslab, atau legacy Asisten)
+    function isAssistant() {
+      return isAsprak() || isAslab();
     }
 
     // Memeriksa apakah pengguna memiliki role 'praktikan'
@@ -84,6 +99,12 @@ service cloud.firestore {
       // Praktikan dan asisten dapat membaca riwayat status sesi
       allow read: if isAuthenticated();
       // Hanya role Asisten yang berhak mencatat riwayat perubahan status sesi
+      allow write: if isAssistant();
+    }
+
+    match /session_status_logs/{logId} {
+      // Koleksi aktual pada COLLECTIONS.STATUS_LOGS
+      allow read: if isAuthenticated();
       allow write: if isAssistant();
     }
 
@@ -146,6 +167,52 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Hanya role Asisten yang berhak membuat, mengubah, atau menghapus laboratorium
       allow write: if isAssistant();
+    }
+
+    // ==========================================
+    // 7. KOLEKSI SPRINT 4 (Courses, LabMembers, Attendances, Fines)
+    // ==========================================
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow write: if isAslab() || isAssistant();
+    }
+
+    match /labMembers/{memberId} {
+      allow read: if isAuthenticated();
+      allow write: if isAslab() || isAssistant();
+    }
+
+    match /attendances/{attendanceId} {
+      // Praktikan melihat presensi miliknya; Asprak & Aslab melihat seluruh presensi sesi
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid || isAsprak() || isAslab()
+      );
+      // Praktikan check-in untuk dirinya sendiri atau Asprak mencatat status EXCUSED/ABSENT
+      allow create: if isAuthenticated() && (
+        request.resource.data.studentId == request.auth.uid || isAsprak()
+      );
+      allow update, delete: if isAsprak();
+    }
+
+    match /fines/{fineId} {
+      // Praktikan melihat tagihan denda miliknya; Asprak & Aslab memantau tagihan denda
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid || isAsprak() || isAslab()
+      );
+      // Tagihan dibuat oleh Asprak atau saat transaksi check-in terlambat praktikan dengan status awal 'unpaid'
+      allow create: if isAuthenticated() && (
+        isAsprak() ||
+        (request.resource.data.studentId == request.auth.uid &&
+          request.resource.data.status == 'unpaid')
+      );
+      // Asprak hanya dapat mengubah denda berstatus 'unpaid' menjadi 'waived'; pemilik tagihan untuk proses bayar
+      allow update: if isAuthenticated() && (
+        (isAsprak() &&
+          (request.resource.data.status != 'waived' || resource.data.status == 'unpaid')) ||
+        (resource.data.studentId == request.auth.uid &&
+          request.resource.data.status in ['pending', 'paid'])
+      );
+      allow delete: if false; // Denda tidak dihapus permanen, gunakan status 'waived'
     }
   }
 }
