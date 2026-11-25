@@ -52,13 +52,15 @@ export default function PraktikanJadwalScreen() {
     return permissions.filter((p) => p.userId === profile.id).length;
   }, [permissions, profile]);
 
-  const totalSessionsCount = scheduledSessions.length > 0 ? scheduledSessions.length : 17;
-  const attendedCount = myAttendanceCount > 0 ? myAttendanceCount : 16;
+  const totalSessionsCount = scheduledSessions.length;
+  const attendedCount = myAttendanceCount;
+  const alpaCount = Math.max(0, totalSessionsCount - (attendedCount + myPermissionsCount));
+
   const attendanceRate = useMemo(() => {
-    if (scheduledSessions.length === 0) return 94.2;
-    const rate = Math.round((attendedCount / totalSessionsCount) * 1000) / 10;
+    if (totalSessionsCount === 0) return attendedCount > 0 ? 100 : 0;
+    const rate = Math.round(((attendedCount + myPermissionsCount) / totalSessionsCount) * 1000) / 10;
     return Math.min(100, Math.max(0, rate));
-  }, [attendedCount, totalSessionsCount, scheduledSessions.length]);
+  }, [attendedCount, myPermissionsCount, totalSessionsCount]);
 
   const handleQuickPresensi = () => {
     if (nextSession) {
@@ -100,9 +102,9 @@ export default function PraktikanJadwalScreen() {
               {/* 1. Google Stitch LABORA TopBar */}
               <LaboraTopBar
                 title="Beranda"
-                subtitle="Informatika (Smt 5)"
+                subtitle="Informatika"
                 roleBadge="⇄ Praktikan"
-                userName={profile?.name ?? "Sara Wilson"}
+                userName={profile?.name || "Mahasiswa"}
                 isOnline={isFirestoreConnected}
                 onRoleBadgePress={() => router.push("/(main)" as any)}
                 onProfilePress={() => void logout()}
@@ -219,9 +221,11 @@ export default function PraktikanJadwalScreen() {
                         <Feather name="folder" size={14} color="#D97706" />
                       </View>
                       <Text style={styles.statBreakdownValue}>
-                        {myPermissionsCount > 0 ? myPermissionsCount : 1} Sesi
+                        {myPermissionsCount} Sesi
                       </Text>
-                      <Text style={styles.statBreakdownSub}>Sakit (Terverifikasi)</Text>
+                      <Text style={styles.statBreakdownSub}>
+                        {myPermissionsCount > 0 ? "Pengajuan Tercatat" : "Tidak Ada Izin"}
+                      </Text>
                     </View>
                   </View>
 
@@ -233,10 +237,12 @@ export default function PraktikanJadwalScreen() {
                       </View>
                       <View>
                         <Text style={styles.statAlpaTitle}>Alpa / Tanpa Keterangan</Text>
-                        <Text style={styles.statAlpaSub}>0 Sesi (Rekor Sempurna)</Text>
+                        <Text style={styles.statAlpaSub}>{alpaCount} Sesi</Text>
                       </View>
                     </View>
-                    <Text style={styles.statAlpaRate}>0.0%</Text>
+                    <Text style={styles.statAlpaRate}>
+                      {totalSessionsCount > 0 ? ((alpaCount / totalSessionsCount) * 100).toFixed(1) : "0.0"}%
+                    </Text>
                   </View>
                 </View>
               </View>
