@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   View,
@@ -13,19 +15,28 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SessionStatusBadge } from '@/components/asisten/session-status-badge';
 import { AttendanceSummaryCards } from '@/components/asisten/attendance-summary-cards';
-import { AttendanceRecordCard } from '@/components/asisten/attendance-record-card';
-import { AbsentPractitionerCard } from '@/components/asisten/absent-practitioner-card';
 import { LeaveRequestCard } from '@/components/asisten/leave-request-card';
 import { LeaveReviewModal } from '@/components/asisten/leave-review-modal';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, LaboraColors, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/context/auth-context';
 import { useSessionContext } from '@/context/session-context';
 import { isFirebaseConfigured } from '@/config/firebase';
+import {
+  evaluateLeaveActionState,
+  filterSessionsForAsprak,
+  getEffectiveSessionStatus,
+  isAsprakAssignedToSession,
+} from '@/features/asprak/asprak-dashboard-helpers';
+import {
+  subscribeToSprint4SessionAttendances,
+  subscribeToSprint4SessionFines,
+} from '@/features/asprak/services/session-snapshot-service';
 import {
   subscribeToSessionAttendance,
   subscribeToSessionLeaveRequests,
 } from '@/services/firestore-service';
-import type { LeaveRequest, LeaveStatus } from '@/types';
+import type { FineStatus, LeaveRequest, LeaveStatus } from '@/types';
 
 type ViewTab = 'PRESENT' | 'LEAVES' | 'ABSENT';
 type LeaveFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -40,9 +51,26 @@ function formatSyncTime(isoString: string): string {
   })} WIB`;
 }
 
+function getFineBadgeColors(status: FineStatus): {
+  bg: string;
+  text: string;
+} {
+  switch (status) {
+    case 'unpaid':
+      return { bg: '#FEE2E2', text: '#B91C1C' };
+    case 'pending':
+      return { bg: '#FEF3C7', text: '#B45309' };
+    case 'paid':
+      return { bg: '#DCFCE7', text: '#15803D' };
+    case 'waived':
+      return { bg: '#E0F2FE', text: '#0369A1' };
+  }
+}
+
 export default function AttendanceRecapScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const theme = useTheme();
+  const { profile } = useAuth();
 
   const {
     sessions,
@@ -53,62 +81,93 @@ export default function AttendanceRecapScreen() {
     realtimeEventCount,
     isFirestoreConnected,
     currentAssistantId,
+    loading,
+    error,
+    actionError,
+    clearActionError,
+    getCourseById,
     getSessionAttendanceRecords,
     getSessionLeaveRequests,
+    getSessionRoster,
+    getStudentFineForSession,
     reviewLeaveRequest,
-    getPractitioners,
   } = useSessionContext();
 
+  const loggedInAsprakId = profile?.id ?? currentAssistantId;
+
+  // Hanya sesi yang ditugaskan kepada Asprak yang sedang login
+  const mySessions = useMemo(
+    () => filterSessionsForAsprak(sessions, loggedInAsprakId),
+    [sessions, loggedInAsprakId]
+  );
+
   const [selectedSessionId, setSelectedSessionId] = useState<string>(() => {
-    return sessions.length > 0 ? sessions[0].id : '';
+    return mySessions.length > 0 ? mySessions[0].id : '';
   });
 
-  const [activeTab, setActiveTab] = useState<ViewTab>('PRESENT');
+  const [activeTab, setActiveTab] = useState<ViewTab>('LEAVES');
   const [leaveFilter, setLeaveFilter] = useState<LeaveFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeReviewRequest, setActiveReviewRequest] = useState<LeaveRequest | null>(
     null
   );
   const [sessionRealtimeTick, setSessionRealtimeTick] = useState<string | null>(null);
+  const [listenerError, setListenerError] = useState<string | null>(null);
 
-  // SRS-09: Berlangganan spesifik per sesi dengan query + onSnapshot saat sesi dipilih
+  // Info sesi terpilih (selalu dari daftar sesi milik Asprak)
+  const selectedSession = useMemo(() => {
+    return mySessions.find((s) => s.id === selectedSessionId) ?? mySessions[0];
+  }, [mySessions, selectedSessionId]);
+
+  const effectiveSessionId = selectedSession?.id ?? '';
+
+  // Berlangganan spesifik per sesi dengan query + onSnapshot (legacy + Sprint 4 attendances & fines)
   useEffect(() => {
-    if (!isFirebaseConfigured || !selectedSessionId) return;
+    if (!isFirebaseConfigured || !effectiveSessionId) return;
 
-    const unsubAtt = subscribeToSessionAttendance(selectedSessionId, () => {
+    const onSync = () => {
+      setListenerError(null);
       setSessionRealtimeTick(new Date().toISOString());
-    });
+    };
+    const onErr = (err: Error) => setListenerError(err.message);
 
-    const unsubLeaves = subscribeToSessionLeaveRequests(selectedSessionId, () => {
-      setSessionRealtimeTick(new Date().toISOString());
-    });
+    const unsubAtt = subscribeToSessionAttendance(effectiveSessionId, onSync, onErr);
+    const unsubLeaves = subscribeToSessionLeaveRequests(effectiveSessionId, onSync, onErr);
+    const unsubSprint4Att = subscribeToSprint4SessionAttendances(effectiveSessionId, onSync, onErr);
+    const unsubSprint4Fines = subscribeToSprint4SessionFines(effectiveSessionId, onSync, onErr);
 
     return () => {
       unsubAtt?.();
       unsubLeaves?.();
+      unsubSprint4Att?.();
+      unsubSprint4Fines?.();
     };
-  }, [selectedSessionId]);
+  }, [effectiveSessionId]);
 
   const effectiveSyncTimestamp = sessionRealtimeTick ?? lastRealtimeSyncAt;
-
-  // Info sesi terpilih
-  const selectedSession = useMemo(() => {
-    return sessions.find((s) => s.id === selectedSessionId) ?? sessions[0];
-  }, [sessions, selectedSessionId]);
-
-  const effectiveSessionId = selectedSession?.id ?? '';
+  const isSessionAuthorized = isAsprakAssignedToSession(selectedSession, loggedInAsprakId);
+  const isOnlineReady = !isFirebaseConfigured || isFirestoreConnected;
 
   const selectedSchedule = useMemo(() => {
     if (!selectedSession) return undefined;
     return schedules.find((sch) => sch.id === selectedSession.scheduleId);
   }, [schedules, selectedSession]);
 
+  const selectedCourse = selectedSession
+    ? getCourseById(selectedSession.courseId)
+    : undefined;
+
   const selectedAssistant = useMemo(() => {
     if (!selectedSession) return undefined;
-    return users.find((u) => u.id === selectedSession.assistantId);
+    return users.find((u) => u.id === (selectedSession.asprakId || selectedSession.assistantId));
   }, [users, selectedSession]);
 
-  // SRS-09: Daftar data presensi praktikan pada sesi terpilih
+  // Daftar monitoring kehadiran real-time berbasis skema Sprint 4
+  const sessionRoster = useMemo(() => {
+    if (!effectiveSessionId) return [];
+    return getSessionRoster(effectiveSessionId);
+  }, [effectiveSessionId, getSessionRoster]);
+
   const attendanceRecords = useMemo(() => {
     if (!effectiveSessionId) return [];
     return getSessionAttendanceRecords(effectiveSessionId);
@@ -120,81 +179,71 @@ export default function AttendanceRecapScreen() {
     return getSessionLeaveRequests(effectiveSessionId);
   }, [effectiveSessionId, getSessionLeaveRequests]);
 
-  const presentUserIds = useMemo(
-    () => new Set(attendanceRecords.map((a) => a.userId)),
-    [attendanceRecords]
+  const presentRoster = useMemo(
+    () => sessionRoster.filter((r) => r.attendanceStatus === 'PRESENT'),
+    [sessionRoster]
   );
 
-  // Peta status izin per userId pada sesi ini
-  const leaveStatusByUserId = useMemo(() => {
-    const map = new Map<string, LeaveStatus>();
-    for (const req of sessionLeaveRequests) {
-      map.set(req.userId, req.status);
-    }
-    return map;
-  }, [sessionLeaveRequests]);
+  const excusedRoster = useMemo(
+    () => sessionRoster.filter((r) => r.attendanceStatus === 'EXCUSED'),
+    [sessionRoster]
+  );
 
-  // Praktikan yang izinnya APPROVED dan tidak melakukan presensi hadir (Status Hadir diutamakan jika tetap datang)
-  const approvedExcusedUserIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const req of sessionLeaveRequests) {
-      if (req.status === 'APPROVED' && !presentUserIds.has(req.userId)) {
-        set.add(req.userId);
-      }
-    }
-    return set;
-  }, [sessionLeaveRequests, presentUserIds]);
+  const absentOrPendingRoster = useMemo(
+    () =>
+      sessionRoster.filter(
+        (r) => r.attendanceStatus === 'ABSENT' || r.attendanceStatus === 'PENDING_CHECKIN'
+      ),
+    [sessionRoster]
+  );
+
+  const presentUserIds = useMemo(
+    () => new Set(presentRoster.map((r) => r.studentId)),
+    [presentRoster]
+  );
 
   const pendingLeaveCount = useMemo(
     () => sessionLeaveRequests.filter((l) => l.status === 'PENDING').length,
     [sessionLeaveRequests]
   );
 
-  // Daftar seluruh praktikan terdaftar
-  const allPractitioners = useMemo(() => {
-    return getPractitioners();
-  }, [getPractitioners]);
-
-  // Daftar praktikan yang belum hadir (tidak presensi DAN tidak memiliki izin APPROVED)
-  const absentPractitioners = useMemo(() => {
-    return allPractitioners.filter(
-      (p) => !presentUserIds.has(p.id) && !approvedExcusedUserIds.has(p.id)
-    );
-  }, [allPractitioners, presentUserIds, approvedExcusedUserIds]);
-
   // Filter berdasarkan teks pencarian
   const filteredPresent = useMemo(() => {
     const queryText = searchQuery.trim().toLowerCase();
-    if (!queryText) return attendanceRecords;
-    return attendanceRecords.filter(
+    if (!queryText) return presentRoster;
+    return presentRoster.filter(
       (a) =>
-        a.userName.toLowerCase().includes(queryText) ||
-        a.userEmail.toLowerCase().includes(queryText)
+        a.name.toLowerCase().includes(queryText) ||
+        a.nim.toLowerCase().includes(queryText) ||
+        a.email.toLowerCase().includes(queryText)
     );
-  }, [attendanceRecords, searchQuery]);
+  }, [presentRoster, searchQuery]);
 
   const filteredAbsent = useMemo(() => {
     const queryText = searchQuery.trim().toLowerCase();
-    if (!queryText) return absentPractitioners;
-    return absentPractitioners.filter(
+    if (!queryText) return absentOrPendingRoster;
+    return absentOrPendingRoster.filter(
       (p) =>
         p.name.toLowerCase().includes(queryText) ||
+        p.nim.toLowerCase().includes(queryText) ||
         p.email.toLowerCase().includes(queryText)
     );
-  }, [absentPractitioners, searchQuery]);
+  }, [absentOrPendingRoster, searchQuery]);
 
   const filteredLeaves = useMemo(() => {
     const queryText = searchQuery.trim().toLowerCase();
     return sessionLeaveRequests.filter((l) => {
       const matchFilter = leaveFilter === 'ALL' || l.status === leaveFilter;
+      const student = users.find((u) => u.id === l.userId);
       const matchQuery =
         !queryText ||
         l.userName.toLowerCase().includes(queryText) ||
+        (student?.nim ?? '').toLowerCase().includes(queryText) ||
         l.userEmail.toLowerCase().includes(queryText) ||
         l.reason.toLowerCase().includes(queryText);
       return matchFilter && matchQuery;
     });
-  }, [sessionLeaveRequests, leaveFilter, searchQuery]);
+  }, [sessionLeaveRequests, leaveFilter, searchQuery, users]);
 
   // Sinkronkan modal peninjauan izin jika datanya berubah
   const currentReviewModalRequest = useMemo(() => {
@@ -204,11 +253,43 @@ export default function AttendanceRecapScreen() {
     );
   }, [sessionLeaveRequests, activeReviewRequest]);
 
+  const currentReviewStudent = currentReviewModalRequest
+    ? users.find((u) => u.id === currentReviewModalRequest.userId)
+    : undefined;
+
+  const currentReviewFine = currentReviewModalRequest
+    ? getStudentFineForSession(
+        currentReviewModalRequest.sessionId,
+        currentReviewModalRequest.userId
+      ) ?? null
+    : null;
+
   const handleQuickDecision = async (
     requestId: string,
     decision: Exclude<LeaveStatus, 'PENDING'>
   ) => {
-    await reviewLeaveRequest(requestId, decision, undefined, currentAssistantId);
+    const req = sessionLeaveRequests.find((l) => l.id === requestId);
+    if (!req) return;
+
+    const relatedFine = getStudentFineForSession(req.sessionId, req.userId) ?? null;
+    const actionState = evaluateLeaveActionState({
+      request: req,
+      relatedFine,
+      isAuthorized: isSessionAuthorized,
+      isOnline: isOnlineReady,
+      isSubmitting: reviewingLeaveIds.includes(requestId),
+    });
+
+    if (!actionState.canAct) {
+      if (Platform.OS === 'web') {
+        window.alert(actionState.blockReason ?? 'Aksi tidak diizinkan.');
+      } else {
+        Alert.alert('Tidak Dapat Memproses Izin', actionState.blockReason ?? 'Aksi tidak diizinkan.');
+      }
+      return;
+    }
+
+    await reviewLeaveRequest(requestId, decision, undefined, loggedInAsprakId);
   };
 
   const handleSubmitModalDecision = async (
@@ -216,13 +297,15 @@ export default function AttendanceRecapScreen() {
     decision: Exclude<LeaveStatus, 'PENDING'>,
     reviewerNote?: string
   ) => {
-    await reviewLeaveRequest(requestId, decision, reviewerNote, currentAssistantId);
+    await reviewLeaveRequest(requestId, decision, reviewerNote, loggedInAsprakId);
   };
 
   const insets = {
     ...safeAreaInsets,
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
   };
+
+  const activeErrorMessage = actionError || listenerError || error;
 
   return (
     <ScrollView
@@ -240,26 +323,42 @@ export default function AttendanceRecapScreen() {
           <View style={styles.headerTopRow}>
             <View style={styles.badgeRole}>
               <ThemedText type="smallBold" style={styles.badgeRoleText}>
-                PANEL ASISTEN LABORATORIUM
+                PANEL ASPRAK
               </ThemedText>
             </View>
 
             {/* SRS-09: Indikator Real-Time Listener onSnapshot */}
-            <View style={styles.realtimeBadge}>
-              <View style={styles.pulseDot} />
-              <ThemedText type="smallBold" style={styles.realtimeBadgeText}>
+            <View
+              style={[
+                styles.realtimeBadge,
+                !isOnlineReady && { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+              ]}>
+              <View
+                style={[
+                  styles.pulseDot,
+                  !isOnlineReady && { backgroundColor: '#EF4444' },
+                ]}
+              />
+              <ThemedText
+                type="smallBold"
+                style={[
+                  styles.realtimeBadgeText,
+                  !isOnlineReady && { color: '#B91C1C' },
+                ]}>
                 {isFirestoreConnected
                   ? 'onSnapshot Live (Firestore)'
-                  : 'onSnapshot Ready'}
+                  : isFirebaseConfigured
+                    ? 'Koneksi Terputus'
+                    : 'Mode Lokal'}
               </ThemedText>
             </View>
           </View>
 
           <ThemedText type="title" style={styles.title}>
-            Rekap Presensi & Keputusan Izin
+            Monitoring Kehadiran & Approval Izin
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            SRS-09 & SRS-10: Pantau rekap presensi real-time berbasis onSnapshot serta tinjau dan putuskan permohonan izin praktikan (APPROVED/REJECTED).
+            Pantau kehadiran praktikan (PRESENT/EXCUSED/ABSENT), keterlambatan, status denda, serta putuskan permohonan izin secara real-time.
           </ThemedText>
 
           <View style={styles.syncMetaBar}>
@@ -269,292 +368,430 @@ export default function AttendanceRecapScreen() {
           </View>
         </View>
 
-        {/* Horizontal Session Selector */}
-        <View style={styles.selectorWrapper}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            Pilih Sesi Praktikum:
-          </ThemedText>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.sessionPillsScroll}>
-            {sessions.map((sess) => {
-              const sch = schedules.find((s) => s.id === sess.scheduleId);
-              const isSelected = sess.id === effectiveSessionId;
-              const sessPendingLeaves = getSessionLeaveRequests(sess.id).filter(
-                (l) => l.status === 'PENDING'
-              ).length;
+        {/* Error & Offline Banner */}
+        {activeErrorMessage ? (
+          <View style={styles.errorBanner}>
+            <ThemedText style={styles.errorBannerText}>
+              ⚠️ {activeErrorMessage}
+            </ThemedText>
+            {actionError ? (
+              <Pressable onPress={clearActionError}>
+                <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#B91C1C' }}>Tutup</ThemedText>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
-              return (
-                <Pressable
-                  key={sess.id}
-                  onPress={() => setSelectedSessionId(sess.id)}
+        {loading ? (
+          <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+            <ActivityIndicator color={LaboraColors.primary} size="large" />
+            <ThemedText type="subtitle" style={styles.emptyTitle}>
+              Memuat data sesi & perizinan…
+            </ThemedText>
+          </ThemedView>
+        ) : mySessions.length === 0 ? (
+          <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+            <ThemedText style={styles.emptyIcon}>📂</ThemedText>
+            <ThemedText type="subtitle" style={styles.emptyTitle}>
+              Belum ada sesi yang ditugaskan
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+              Anda hanya dapat memantau kehadiran dan izin untuk sesi praktikum yang ditugaskan kepada akun Asprak Anda.
+            </ThemedText>
+          </ThemedView>
+        ) : (
+          <>
+            {/* Horizontal Session Selector (Strictly scoped to logged-in Asprak) */}
+            <View style={styles.selectorWrapper}>
+              <ThemedText type="smallBold" themeColor="textSecondary">
+                Pilih Sesi Tugas Anda ({mySessions.length}):
+              </ThemedText>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.sessionPillsScroll}>
+                {mySessions.map((sess) => {
+                  const sch = schedules.find((s) => s.id === sess.scheduleId);
+                  const course = getCourseById(sess.courseId);
+                  const isSelected = sess.id === effectiveSessionId;
+                  const sessPendingLeaves = getSessionLeaveRequests(sess.id).filter(
+                    (l) => l.status === 'PENDING'
+                  ).length;
+                  const effStatus = getEffectiveSessionStatus(sess);
+
+                  return (
+                    <Pressable
+                      key={sess.id}
+                      onPress={() => setSelectedSessionId(sess.id)}
+                      style={[
+                        styles.sessionPill,
+                        isSelected && styles.sessionPillActive,
+                      ]}>
+                      <ThemedText
+                        type="smallBold"
+                        style={[
+                          styles.sessionPillCode,
+                          isSelected && styles.sessionPillTextActive,
+                        ]}>
+                        {course?.code ?? sch?.courseCode ?? 'LAB'}
+                      </ThemedText>
+                      <ThemedText
+                        type="small"
+                        style={[
+                          styles.sessionPillTitle,
+                          isSelected && styles.sessionPillTextActive,
+                        ]}
+                        numberOfLines={1}>
+                        {course?.name ?? sch?.title ?? 'Sesi'}
+                      </ThemedText>
+                      {sessPendingLeaves > 0 ? (
+                        <View style={styles.pendingPillCounter}>
+                          <ThemedText type="smallBold" style={styles.pendingPillCounterText}>
+                            {sessPendingLeaves} Izin
+                          </ThemedText>
+                        </View>
+                      ) : null}
+                      <View
+                        style={[
+                          styles.dotStatus,
+                          effStatus === 'OPEN' ? styles.dotOpen : styles.dotClosed,
+                        ]}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Selected Session Info Banner */}
+            {selectedSession && (
+              <ThemedView type="backgroundElement" style={styles.sessionBanner}>
+                <View style={styles.bannerHeader}>
+                  <View style={styles.bannerTitleCol}>
+                    <ThemedText type="small" style={styles.courseCodeText}>
+                      {selectedCourse?.code ?? selectedSchedule?.courseCode ?? 'LAB'}
+                      {selectedSchedule?.className ? ` • ${selectedSchedule.className}` : ''}
+                    </ThemedText>
+                    <ThemedText type="subtitle" style={styles.courseTitleText}>
+                      {selectedCourse?.name ?? selectedSchedule?.title ?? 'Sesi Praktikum'}
+                    </ThemedText>
+                  </View>
+                  <SessionStatusBadge status={getEffectiveSessionStatus(selectedSession)} size="small" />
+                </View>
+
+                <View style={styles.bannerMetaRow}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    📍 {selectedSchedule?.room ?? selectedSession.labId ?? '-'}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    📅 {selectedSchedule?.date ?? '-'} ({selectedSchedule?.startTime ?? '-'} - {selectedSchedule?.endTime ?? '-'})
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    👤 Asprak: {selectedAssistant?.name ?? profile?.name ?? '-'}
+                  </ThemedText>
+                </View>
+              </ThemedView>
+            )}
+
+            {/* Summary Metrics Cards */}
+            {selectedSession && (
+              <AttendanceSummaryCards
+                presentCount={presentRoster.length || attendanceRecords.length}
+                approvedLeaveCount={excusedRoster.length}
+                pendingLeaveCount={pendingLeaveCount}
+                absentCount={absentOrPendingRoster.length}
+                totalStudents={sessionRoster.length}
+                sessionStatus={selectedSession.status}
+              />
+            )}
+
+            {/* Search Bar & 3-Tab Filter */}
+            <View style={styles.listSection}>
+              <View style={styles.searchContainer}>
+                <ThemedText style={styles.searchIcon}>🔍</ThemedText>
+                <TextInput
                   style={[
-                    styles.sessionPill,
-                    isSelected && styles.sessionPillActive,
-                  ]}>
+                    styles.searchInput,
+                    { color: theme.text, backgroundColor: 'transparent' },
+                  ]}
+                  placeholder="Cari nama, NIM, email, atau alasan izin..."
+                  placeholderTextColor="#94A3B8"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                  <Pressable onPress={() => setSearchQuery('')} style={styles.clearButton}>
+                    <ThemedText style={styles.clearButtonText}>✕</ThemedText>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* View Mode Tabs */}
+              <View style={styles.tabBar}>
+                <Pressable
+                  onPress={() => setActiveTab('PRESENT')}
+                  style={[styles.tabItem, activeTab === 'PRESENT' && styles.tabItemActive]}>
                   <ThemedText
                     type="smallBold"
                     style={[
-                      styles.sessionPillCode,
-                      isSelected && styles.sessionPillTextActive,
+                      styles.tabItemText,
+                      activeTab === 'PRESENT' && styles.tabItemTextActive,
                     ]}>
-                    {sch?.courseCode ?? 'LAB'}
+                    🟢 Hadir ({filteredPresent.length})
                   </ThemedText>
-                  <ThemedText
-                    type="small"
-                    style={[
-                      styles.sessionPillTitle,
-                      isSelected && styles.sessionPillTextActive,
-                    ]}
-                    numberOfLines={1}>
-                    {sch?.title ?? 'Sesi'}
-                  </ThemedText>
-                  {sessPendingLeaves > 0 ? (
-                    <View style={styles.pendingPillCounter}>
-                      <ThemedText type="smallBold" style={styles.pendingPillCounterText}>
-                        {sessPendingLeaves} Izin
-                      </ThemedText>
-                    </View>
-                  ) : null}
-                  <View
-                    style={[
-                      styles.dotStatus,
-                      sess.status === 'OPEN' ? styles.dotOpen : styles.dotClosed,
-                    ]}
-                  />
                 </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
 
-        {/* Selected Session Info Banner */}
-        {selectedSchedule && selectedSession && (
-          <ThemedView type="backgroundElement" style={styles.sessionBanner}>
-            <View style={styles.bannerHeader}>
-              <View style={styles.bannerTitleCol}>
-                <ThemedText type="small" style={styles.courseCodeText}>
-                  {selectedSchedule.courseCode}
-                  {selectedSchedule.className ? ` • ${selectedSchedule.className}` : ''}
-                </ThemedText>
-                <ThemedText type="subtitle" style={styles.courseTitleText}>
-                  {selectedSchedule.title}
-                </ThemedText>
-              </View>
-              <SessionStatusBadge status={selectedSession.status} size="small" />
-            </View>
-
-            <View style={styles.bannerMetaRow}>
-              <ThemedText type="small" themeColor="textSecondary">
-                📍 {selectedSchedule.room}
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                📅 {selectedSchedule.date} ({selectedSchedule.startTime} - {selectedSchedule.endTime})
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                👤 Asisten: {selectedAssistant?.name ?? '-'}
-              </ThemedText>
-            </View>
-          </ThemedView>
-        )}
-
-        {/* Summary Metrics Cards (SRS-09 & SRS-10) */}
-        {selectedSession && (
-          <AttendanceSummaryCards
-            presentCount={attendanceRecords.length}
-            approvedLeaveCount={approvedExcusedUserIds.size}
-            pendingLeaveCount={pendingLeaveCount}
-            absentCount={absentPractitioners.length}
-            totalStudents={allPractitioners.length}
-            sessionStatus={selectedSession.status}
-          />
-        )}
-
-        {/* Search Bar & 3-Tab Filter (Hadir | Pengajuan Izin | Belum Hadir) */}
-        <View style={styles.listSection}>
-          <View style={styles.searchContainer}>
-            <ThemedText style={styles.searchIcon}>🔍</ThemedText>
-            <TextInput
-              style={[
-                styles.searchInput,
-                { color: theme.text, backgroundColor: 'transparent' },
-              ]}
-              placeholder="Cari nama, email, atau alasan izin..."
-              placeholderTextColor="#94A3B8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')} style={styles.clearButton}>
-                <ThemedText style={styles.clearButtonText}>✕</ThemedText>
-              </Pressable>
-            )}
-          </View>
-
-          {/* View Mode Tabs */}
-          <View style={styles.tabBar}>
-            <Pressable
-              onPress={() => setActiveTab('PRESENT')}
-              style={[styles.tabItem, activeTab === 'PRESENT' && styles.tabItemActive]}>
-              <ThemedText
-                type="smallBold"
-                style={[
-                  styles.tabItemText,
-                  activeTab === 'PRESENT' && styles.tabItemTextActive,
-                ]}>
-                🟢 Hadir ({filteredPresent.length})
-              </ThemedText>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setActiveTab('LEAVES')}
-              style={[styles.tabItem, activeTab === 'LEAVES' && styles.tabItemActive]}>
-              <ThemedText
-                type="smallBold"
-                style={[
-                  styles.tabItemText,
-                  activeTab === 'LEAVES' && styles.tabItemTextActive,
-                ]}>
-                📋 Izin ({sessionLeaveRequests.length})
-                {pendingLeaveCount > 0 ? ` • ${pendingLeaveCount} Baru` : ''}
-              </ThemedText>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setActiveTab('ABSENT')}
-              style={[styles.tabItem, activeTab === 'ABSENT' && styles.tabItemActive]}>
-              <ThemedText
-                type="smallBold"
-                style={[
-                  styles.tabItemText,
-                  activeTab === 'ABSENT' && styles.tabItemTextActive,
-                ]}>
-                ⚪ Belum Hadir ({filteredAbsent.length})
-              </ThemedText>
-            </Pressable>
-          </View>
-
-          {/* Sub-Filter Status Izin pada Tab LEAVES (SRS-10) */}
-          {activeTab === 'LEAVES' ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.leaveFilterRow}>
-              {(
-                [
-                  { key: 'ALL', label: `Semua (${sessionLeaveRequests.length})` },
-                  {
-                    key: 'PENDING',
-                    label: `⏳ Menunggu (${sessionLeaveRequests.filter((l) => l.status === 'PENDING').length})`,
-                  },
-                  {
-                    key: 'APPROVED',
-                    label: `✅ Disetujui (${sessionLeaveRequests.filter((l) => l.status === 'APPROVED').length})`,
-                  },
-                  {
-                    key: 'REJECTED',
-                    label: `❌ Ditolak (${sessionLeaveRequests.filter((l) => l.status === 'REJECTED').length})`,
-                  },
-                ] as { key: LeaveFilter; label: string }[]
-              ).map((item) => {
-                const isSelected = leaveFilter === item.key;
-                return (
-                  <Pressable
-                    key={item.key}
-                    onPress={() => setLeaveFilter(item.key)}
+                <Pressable
+                  onPress={() => setActiveTab('LEAVES')}
+                  style={[styles.tabItem, activeTab === 'LEAVES' && styles.tabItemActive]}>
+                  <ThemedText
+                    type="smallBold"
                     style={[
-                      styles.leaveFilterPill,
-                      isSelected && styles.leaveFilterPillActive,
+                      styles.tabItemText,
+                      activeTab === 'LEAVES' && styles.tabItemTextActive,
                     ]}>
-                    <ThemedText
-                      type="smallBold"
-                      style={[
-                        styles.leaveFilterText,
-                        isSelected && styles.leaveFilterTextActive,
-                      ]}>
-                      {item.label}
-                    </ThemedText>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : null}
+                    📋 Izin ({sessionLeaveRequests.length})
+                    {pendingLeaveCount > 0 ? ` • ${pendingLeaveCount} Baru` : ''}
+                  </ThemedText>
+                </Pressable>
 
-          {/* List Content */}
-          <View style={styles.recordsList}>
-            {activeTab === 'PRESENT' ? (
-              filteredPresent.length === 0 ? (
-                <ThemedView type="backgroundElement" style={styles.emptyContainer}>
-                  <ThemedText style={styles.emptyIcon}>📋</ThemedText>
-                  <ThemedText type="subtitle" style={styles.emptyTitle}>
-                    {searchQuery
-                      ? 'Praktikan tidak ditemukan'
-                      : 'Belum ada data presensi'}
+                <Pressable
+                  onPress={() => setActiveTab('ABSENT')}
+                  style={[styles.tabItem, activeTab === 'ABSENT' && styles.tabItemActive]}>
+                  <ThemedText
+                    type="smallBold"
+                    style={[
+                      styles.tabItemText,
+                      activeTab === 'ABSENT' && styles.tabItemTextActive,
+                    ]}>
+                    ⚪ Tidak / Belum ({filteredAbsent.length})
                   </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                    {searchQuery
-                      ? `Tidak ada praktikan hadir yang cocok dengan pencarian "${searchQuery}".`
-                      : 'Belum ada praktikan yang melakukan presensi pada sesi praktikum ini.'}
-                  </ThemedText>
-                </ThemedView>
-              ) : (
-                filteredPresent.map((rec, index) => (
-                  <AttendanceRecordCard key={rec.id} record={rec} index={index} />
-                ))
-              )
-            ) : activeTab === 'LEAVES' ? (
-              filteredLeaves.length === 0 ? (
-                <ThemedView type="backgroundElement" style={styles.emptyContainer}>
-                  <ThemedText style={styles.emptyIcon}>📨</ThemedText>
-                  <ThemedText type="subtitle" style={styles.emptyTitle}>
-                    Tidak ada pengajuan izin
-                  </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                    Tidak ada permohonan izin praktikan yang sesuai dengan filter pada sesi ini.
-                  </ThemedText>
-                </ThemedView>
-              ) : (
-                filteredLeaves.map((req) => (
-                  <LeaveRequestCard
-                    key={req.id}
-                    request={req}
-                    isPresentInSession={presentUserIds.has(req.userId)}
-                    isReviewing={reviewingLeaveIds.includes(req.id)}
-                    onQuickDecision={handleQuickDecision}
-                    onOpenReviewModal={setActiveReviewRequest}
-                  />
-                ))
-              )
-            ) : filteredAbsent.length === 0 ? (
-              <ThemedView type="backgroundElement" style={styles.emptyContainer}>
-                <ThemedText style={styles.emptyIcon}>🎉</ThemedText>
-                <ThemedText type="subtitle" style={styles.emptyTitle}>
-                  Semua praktikan telah hadir / terkonfirmasi izin
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  Seluruh praktikan terdaftar sudah tercatat hadir atau memiliki izin yang disetujui (APPROVED) pada sesi ini.
-                </ThemedText>
-              </ThemedView>
-            ) : (
-              filteredAbsent.map((student, index) => (
-                <AbsentPractitionerCard
-                  key={student.id}
-                  user={student}
-                  index={index}
-                  leaveStatus={leaveStatusByUserId.get(student.id)}
-                />
-              ))
-            )}
-          </View>
-        </View>
+                </Pressable>
+              </View>
+
+              {/* Sub-Filter Status Izin pada Tab LEAVES */}
+              {activeTab === 'LEAVES' ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.leaveFilterRow}>
+                  {(
+                    [
+                      { key: 'ALL', label: `Semua (${sessionLeaveRequests.length})` },
+                      {
+                        key: 'PENDING',
+                        label: `⏳ PENDING (${sessionLeaveRequests.filter((l) => l.status === 'PENDING').length})`,
+                      },
+                      {
+                        key: 'APPROVED',
+                        label: `✅ APPROVED (${sessionLeaveRequests.filter((l) => l.status === 'APPROVED').length})`,
+                      },
+                      {
+                        key: 'REJECTED',
+                        label: `❌ REJECTED (${sessionLeaveRequests.filter((l) => l.status === 'REJECTED').length})`,
+                      },
+                    ] as { key: LeaveFilter; label: string }[]
+                  ).map((item) => {
+                    const isSelected = leaveFilter === item.key;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        onPress={() => setLeaveFilter(item.key)}
+                        style={[
+                          styles.leaveFilterPill,
+                          isSelected && styles.leaveFilterPillActive,
+                        ]}>
+                        <ThemedText
+                          type="smallBold"
+                          style={[
+                            styles.leaveFilterText,
+                            isSelected && styles.leaveFilterTextActive,
+                          ]}>
+                          {item.label}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
+
+              {/* List Content */}
+              <View style={styles.recordsList}>
+                {activeTab === 'PRESENT' ? (
+                  filteredPresent.length === 0 ? (
+                    <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                      <ThemedText style={styles.emptyIcon}>📋</ThemedText>
+                      <ThemedText type="subtitle" style={styles.emptyTitle}>
+                        {searchQuery
+                          ? 'Praktikan tidak ditemukan'
+                          : 'Belum ada data presensi'}
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                        {searchQuery
+                          ? `Tidak ada praktikan hadir yang cocok dengan pencarian "${searchQuery}".`
+                          : 'Belum ada praktikan yang melakukan check-in pada sesi praktikum ini.'}
+                      </ThemedText>
+                    </ThemedView>
+                  ) : (
+                    filteredPresent.map((item) => {
+                      const fineColors = item.fine
+                        ? getFineBadgeColors(item.fine.status)
+                        : null;
+                      return (
+                        <ThemedView
+                          key={item.studentId}
+                          type="backgroundElement"
+                          style={styles.rosterCard}>
+                          <View style={styles.rosterTopRow}>
+                            <View style={{ flex: 1 }}>
+                              <ThemedText type="smallBold">{item.name}</ThemedText>
+                              <ThemedText type="small" themeColor="textSecondary">
+                                NIM: {item.nim} • {item.email}
+                              </ThemedText>
+                            </View>
+                            <View
+                              style={[
+                                styles.rosterStatusBadge,
+                                item.isLate
+                                  ? { backgroundColor: '#FEF3C7' }
+                                  : { backgroundColor: '#DCFCE7' },
+                              ]}>
+                              <ThemedText
+                                type="smallBold"
+                                style={{
+                                  fontSize: 10,
+                                  color: item.isLate ? '#B45309' : '#15803D',
+                                }}>
+                                {item.isLate
+                                  ? `PRESENT • Terlambat ${item.lateMinutes} mnt`
+                                  : 'PRESENT • Tepat Waktu'}
+                              </ThemedText>
+                            </View>
+                          </View>
+
+                          <View style={styles.rosterMetaRow}>
+                            <ThemedText type="small" themeColor="textSecondary">
+                              🕒 Check-in: {formatSyncTime(item.checkedInAt ?? '')}
+                            </ThemedText>
+                            {item.fine && fineColors ? (
+                              <View
+                                style={[
+                                  styles.fineBadge,
+                                  { backgroundColor: fineColors.bg },
+                                ]}>
+                                <ThemedText
+                                  type="smallBold"
+                                  style={{ fontSize: 10, color: fineColors.text }}>
+                                  Fine: {item.fine.status} (Rp{item.fine.amount.toLocaleString('id-ID')})
+                                </ThemedText>
+                              </View>
+                            ) : null}
+                          </View>
+                        </ThemedView>
+                      );
+                    })
+                  )
+                ) : activeTab === 'LEAVES' ? (
+                  filteredLeaves.length === 0 ? (
+                    <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                      <ThemedText style={styles.emptyIcon}>📨</ThemedText>
+                      <ThemedText type="subtitle" style={styles.emptyTitle}>
+                        Tidak ada pengajuan izin
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                        Tidak ada permohonan izin praktikan yang sesuai dengan filter pada sesi ini.
+                      </ThemedText>
+                    </ThemedView>
+                  ) : (
+                    filteredLeaves.map((req) => {
+                      const relatedFine =
+                        getStudentFineForSession(req.sessionId, req.userId) ?? null;
+                      const fineColors = relatedFine
+                        ? getFineBadgeColors(relatedFine.status)
+                        : null;
+                      return (
+                        <View key={req.id} style={{ gap: 4 }}>
+                          <LeaveRequestCard
+                            request={req}
+                            isPresentInSession={presentUserIds.has(req.userId)}
+                            isReviewing={reviewingLeaveIds.includes(req.id)}
+                            onQuickDecision={handleQuickDecision}
+                            onOpenReviewModal={setActiveReviewRequest}
+                          />
+                          {relatedFine && fineColors ? (
+                            <View
+                              style={[
+                                styles.fineHintBar,
+                                { backgroundColor: fineColors.bg },
+                              ]}>
+                              <ThemedText
+                                type="smallBold"
+                                style={{ fontSize: 11, color: fineColors.text }}>
+                                Status Denda Sesi Ini: {relatedFine.status} (Rp
+                                {relatedFine.amount.toLocaleString('id-ID')})
+                              </ThemedText>
+                            </View>
+                          ) : null}
+                        </View>
+                      );
+                    })
+                  )
+                ) : filteredAbsent.length === 0 ? (
+                  <ThemedView type="backgroundElement" style={styles.emptyContainer}>
+                    <ThemedText style={styles.emptyIcon}>🎉</ThemedText>
+                    <ThemedText type="subtitle" style={styles.emptyTitle}>
+                      Semua praktikan telah hadir / terkonfirmasi izin
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                      Seluruh praktikan terdaftar sudah tercatat PRESENT atau EXCUSED pada sesi ini.
+                    </ThemedText>
+                  </ThemedView>
+                ) : (
+                  filteredAbsent.map((student) => (
+                    <ThemedView
+                      key={student.studentId}
+                      type="backgroundElement"
+                      style={styles.rosterCard}>
+                      <View style={styles.rosterTopRow}>
+                        <View style={{ flex: 1 }}>
+                          <ThemedText type="smallBold">{student.name}</ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            NIM: {student.nim} • {student.email}
+                          </ThemedText>
+                        </View>
+                        <View
+                          style={[
+                            styles.rosterStatusBadge,
+                            { backgroundColor: '#F1F5F9' },
+                          ]}>
+                          <ThemedText
+                            type="smallBold"
+                            style={{ fontSize: 10, color: '#475569' }}>
+                            {student.attendanceStatus === 'ABSENT'
+                              ? 'ABSENT'
+                              : 'BELUM CHECK-IN'}
+                          </ThemedText>
+                        </View>
+                      </View>
+                    </ThemedView>
+                  ))
+                )}
+              </View>
+            </View>
+          </>
+        )}
       </View>
 
-      {/* Modal Peninjauan & Keputusan Izin (SRS-10) */}
+      {/* Modal Peninjauan & Keputusan Izin (SRS-10 & Sprint 4 Waiver Guard) */}
       <LeaveReviewModal
         visible={!!currentReviewModalRequest}
         request={currentReviewModalRequest}
-        sessionTitle={selectedSchedule?.title}
+        sessionTitle={selectedCourse?.name ?? selectedSchedule?.title}
+        courseCode={selectedCourse?.code ?? selectedSchedule?.courseCode}
+        studentNim={currentReviewStudent?.nim}
+        relatedFine={currentReviewFine}
+        isAuthorized={isSessionAuthorized}
+        isOnline={isOnlineReady}
         isSubmitting={
           currentReviewModalRequest
             ? reviewingLeaveIds.includes(currentReviewModalRequest.id)
@@ -840,5 +1077,57 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     maxWidth: 320,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rosterCard: {
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.06)',
+  },
+  rosterTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  rosterStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  rosterMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  fineBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  fineHintBar: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
 });

@@ -1,20 +1,28 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   TextInput,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing, LaboraColors } from '@/constants/theme';
-import type { SessionWithDetails } from '@/context/session-context';
-import { useSessionContext } from '@/context/session-context';
-import type { SessionStatusLog, User } from '@/types';
+import { LaboraColors, Spacing } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
+import { useSessionContext, type SessionWithDetails } from '@/context/session-context';
+import {
+  getEffectiveSessionStatus,
+  isAsprakAssignedToSession,
+  type RosterDisplayStatus,
+} from '@/features/asprak/asprak-dashboard-helpers';
+import { resolveSessionConfigSnapshotOptional } from '@/features/asprak/services/session-snapshot-helpers';
+import { findLabForRoom } from '@/utils/attendance-location';
+import type { FineStatus, SessionStatusLog, User } from '@/types';
 import { confirmSessionStatusChange } from './session-card';
+import { SessionStatusBadge } from './session-status-badge';
 import { SessionQRModal } from './session-qr-modal';
 
 interface SessionDetailModalProps {
@@ -29,6 +37,33 @@ interface SessionDetailModalProps {
   onEditSession?: (session: SessionWithDetails) => void;
 }
 
+function formatCheckInTime(iso?: string): string {
+  if (!iso) return '-';
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return `${parsed.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })} WIB`;
+}
+
+function getFineBadgeMeta(status: FineStatus): {
+  label: string;
+  bg: string;
+  color: string;
+} {
+  switch (status) {
+    case 'unpaid':
+      return { label: 'Denda: unpaid', bg: '#FEE2E2', color: '#B91C1C' };
+    case 'pending':
+      return { label: 'Denda: pending', bg: '#FEF3C7', color: '#B45309' };
+    case 'paid':
+      return { label: 'Denda: paid', bg: '#DCFCE7', color: '#15803D' };
+    case 'waived':
+      return { label: 'Denda: waived', bg: '#E0F2FE', color: '#0369A1' };
+  }
+}
+
 export function SessionDetailModal({
   session,
   visible,
@@ -40,157 +75,84 @@ export function SessionDetailModal({
   onToggleStatus,
   onEditSession,
 }: SessionDetailModalProps) {
-  const { users, permissions, getSessionAttendanceRecords } = useSessionContext();
+  const { profile } = useAuth();
+  const {
+    labs,
+    isFirestoreConnected,
+    actionError,
+    getCourseById,
+    getLabById,
+    getSessionRoster,
+  } = useSessionContext();
   const [showQRModal, setShowQRModal] = useState(false);
-  const [allowManualGps, setAllowManualGps] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'HADIR' | 'BELUM' | 'IZIN'>('ALL');
+  const [selectedFilter, setSelectedFilter] = useState<
+    'ALL' | RosterDisplayStatus
+  >('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const sessionRecords = useMemo(() => {
-    return session ? getSessionAttendanceRecords(session.id) : [];
-  }, [session, getSessionAttendanceRecords]);
+  const roster = useMemo(() => {
+    return session ? getSessionRoster(session.id) : [];
+  }, [session, getSessionRoster]);
 
-  const sessionPermissions = useMemo(() => {
-    return session ? permissions.filter((p) => p.sessionId === session.id) : [];
-  }, [session, permissions]);
-
-  const practitionerUsers = useMemo(() => {
-    return users.filter((u) => u.role === 'praktikan');
-  }, [users]);
-
-  // Combine into a full student list with real live data
-  const dynamicStudentList = useMemo(() => {
-    const list: {
-      id: string;
-      initial: string;
-      name: string;
-      nim: string;
-      status: 'TEPAT_WAKTU' | 'HADIR' | 'IZIN' | 'BELUM' | 'LUAR_RADIUS';
-      time?: string;
-      radius?: string;
-      isWithin: boolean;
-      attachment?: string;
-    }[] = [];
-
-    // 1. Add students who have recorded attendance
-    sessionRecords.forEach((record) => {
-      const user = users.find((u) => u.id === record.userId);
-      const name = record.userName || user?.name || 'Mahasiswa';
-      const nim = user?.nim || '2110511000';
-      const isWithin = (record.distanceMeters ?? 0) <= 30;
-      const initial = name
-        .split(' ')
-        .map((n) => n[0])
-        .slice(0, 2)
-        .join('')
-        .toUpperCase();
-
-      let formattedTime = '-';
-      try {
-        const d = new Date(record.recordedAt);
-        formattedTime = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-      } catch {
-        formattedTime = '-';
-      }
-
-      list.push({
-        id: record.id,
-        initial: initial || 'M',
-        name,
-        nim,
-        status: !isWithin ? 'LUAR_RADIUS' : 'HADIR',
-        time: formattedTime,
-        radius: record.distanceMeters !== undefined ? `${record.distanceMeters} meter` : 'GPS Verified',
-        isWithin,
-      });
-    });
-
-    // 2. Add students with permissions for this session
-    sessionPermissions.forEach((perm) => {
-      const user = users.find((u) => u.id === perm.userId);
-      const name = user?.name || 'Mahasiswa';
-      const nim = user?.nim || '2110511000';
-      // Avoid duplicate if already added
-      if (list.some((item) => item.id === perm.id || item.nim === nim)) return;
-
-      const initial = name
-        .split(' ')
-        .map((n) => n[0])
-        .slice(0, 2)
-        .join('')
-        .toUpperCase();
-
-      list.push({
-        id: perm.id,
-        initial: initial || 'M',
-        name,
-        nim,
-        status: 'IZIN',
-        attachment: perm.reason || 'Izin Praktikum',
-        isWithin: false,
-      });
-    });
-
-    // 3. Add remaining registered practitioners who haven't attended yet
-    practitionerUsers.forEach((stu) => {
-      const alreadyIncluded = list.some(
-        (item) => item.name.toLowerCase() === stu.name.toLowerCase() || (stu.nim && item.nim === stu.nim)
-      );
-      if (!alreadyIncluded) {
-        const initial = stu.name
-          .split(' ')
-          .map((n) => n[0])
-          .slice(0, 2)
-          .join('')
-          .toUpperCase();
-
-        list.push({
-          id: stu.id,
-          initial: initial || 'M',
-          name: stu.name,
-          nim: stu.nim || '2110511000',
-          status: 'BELUM',
-          isWithin: false,
-        });
-      }
-    });
-
-    return list;
-  }, [sessionRecords, sessionPermissions, practitionerUsers, users]);
-
-  const totalCount = dynamicStudentList.length;
-  const hadirCount = dynamicStudentList.filter((s) => s.status === 'HADIR' || s.status === 'TEPAT_WAKTU' || s.status === 'LUAR_RADIUS').length;
-  const izinCount = dynamicStudentList.filter((s) => s.status === 'IZIN').length;
-  const belumCount = dynamicStudentList.filter((s) => s.status === 'BELUM').length;
-  const tingkatHadirPct = totalCount > 0 ? Math.round(((hadirCount + izinCount) / totalCount) * 1000) / 10 : 0;
+  const totalCount = roster.length;
+  const presentCount = roster.filter((s) => s.attendanceStatus === 'PRESENT').length;
+  const excusedCount = roster.filter((s) => s.attendanceStatus === 'EXCUSED').length;
+  const absentCount = roster.filter(
+    (s) => s.attendanceStatus === 'ABSENT' || s.attendanceStatus === 'PENDING_CHECKIN'
+  ).length;
+  const lateCount = roster.filter((s) => s.isLate).length;
+  const tingkatHadirPct =
+    totalCount > 0 ? Math.round(((presentCount + excusedCount) / totalCount) * 1000) / 10 : 0;
 
   const filteredStudentList = useMemo(() => {
-    return dynamicStudentList.filter((stu) => {
-      if (selectedFilter === 'HADIR' && stu.status !== 'HADIR' && stu.status !== 'TEPAT_WAKTU' && stu.status !== 'LUAR_RADIUS') return false;
-      if (selectedFilter === 'IZIN' && stu.status !== 'IZIN') return false;
-      if (selectedFilter === 'BELUM' && stu.status !== 'BELUM') return false;
+    return roster.filter((stu) => {
+      if (selectedFilter !== 'ALL') {
+        if (selectedFilter === 'ABSENT') {
+          if (
+            stu.attendanceStatus !== 'ABSENT' &&
+            stu.attendanceStatus !== 'PENDING_CHECKIN'
+          ) {
+            return false;
+          }
+        } else if (stu.attendanceStatus !== selectedFilter) {
+          return false;
+        }
+      }
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        return stu.name.toLowerCase().includes(q) || stu.nim.toLowerCase().includes(q);
+        return (
+          stu.name.toLowerCase().includes(q) ||
+          stu.nim.toLowerCase().includes(q) ||
+          stu.email.toLowerCase().includes(q)
+        );
       }
       return true;
     });
-  }, [dynamicStudentList, selectedFilter, searchQuery]);
+  }, [roster, selectedFilter, searchQuery]);
 
   if (!session) return null;
 
-  const {
-    schedule,
-    assistant,
-    status,
-  } = session;
-  const isOpen = status === 'OPEN';
+  const { schedule, assistant } = session;
+  const effectiveStatus = getEffectiveSessionStatus(session);
+  const isOpen = effectiveStatus === 'OPEN';
+  const actingUserId = profile?.id ?? selectedAssistantId;
+  const isAuthorized = isAsprakAssignedToSession(session, actingUserId);
+
+  const relatedCourse = getCourseById(session.courseId);
+  const relatedLab =
+    (session.labId ? getLabById(session.labId) : undefined) ??
+    findLabForRoom(labs, schedule?.room);
+  const configSnapshot = resolveSessionConfigSnapshotOptional(
+    relatedLab,
+    session.configSnapshot
+  );
 
   const handleToggleWithConfirmation = () => {
+    if (!isAuthorized) return;
     confirmSessionStatusChange({
       session,
-      selectedAssistantId,
+      selectedAssistantId: actingUserId,
       activeAssistant,
       onConfirm: () => onToggleStatus(session.id),
     });
@@ -221,25 +183,36 @@ export function SessionDetailModal({
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
             {/* Course Title & Room Details */}
             <View style={styles.courseHeader}>
-              <ThemedText style={styles.courseTitle}>
-                {schedule?.title ?? 'Praktikum Jaringan Komputer Lanjut'}
-              </ThemedText>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <ThemedText style={[styles.courseTitle, { flex: 1 }]}>
+                  {relatedCourse?.name ?? schedule?.title ?? 'Sesi Praktikum'}
+                </ThemedText>
+                <SessionStatusBadge status={effectiveStatus} size="small" isUpdating={isUpdating} />
+              </View>
               <View style={styles.metaRow}>
                 <Feather name="map-pin" size={13} color={LaboraColors.primary} />
                 <ThemedText style={styles.metaText}>
-                  {schedule?.room ?? 'Lab Rekayasa Jaringan & IoT'} • Gedung F Lantai 3
+                  {relatedLab?.name ?? schedule?.room ?? 'Lab belum ditentukan'}
+                  {relatedLab?.building ? ` • ${relatedLab.building}` : ''}
                 </ThemedText>
               </View>
               <View style={styles.metaRow}>
                 <Feather name="clock" size={13} color={LaboraColors.primary} />
                 <ThemedText style={styles.metaText}>
-                  {schedule?.date ?? 'Senin, 21 Okt 2024'} • {schedule?.startTime ?? '09:30'} - {schedule?.endTime ?? '12:00'} WIB (Sesi {schedule?.sessionNumber ?? 2})
+                  {schedule?.date ?? '-'} • {schedule?.startTime ?? '-'} - {schedule?.endTime ?? '-'} WIB
+                  {schedule?.sessionNumber ? ` (Sesi ${schedule.sessionNumber})` : ''}
                 </ThemedText>
               </View>
               <View style={styles.metaRow}>
-                <Feather name="radio" size={13} color={LaboraColors.primary} />
-                <ThemedText style={styles.metaText}>
-                  Anchor Node: <ThemedText style={styles.anchorPill}>AP-LAB-NET3-5G</ThemedText>
+                <Feather name="shield" size={13} color={configSnapshot ? LaboraColors.primary : LaboraColors.danger} />
+                <ThemedText
+                  style={[
+                    styles.metaText,
+                    !configSnapshot && { color: LaboraColors.danger, fontWeight: '600' },
+                  ]}>
+                  {configSnapshot
+                    ? `Toleransi: ${configSnapshot.gracePeriodMinutes} mnt • Denda Terlambat: Rp${configSnapshot.lateFineAmount.toLocaleString('id-ID')}`
+                    : 'Konfigurasi toleransi & denda Lab belum diatur oleh Aslab'}
                 </ThemedText>
               </View>
             </View>
@@ -247,61 +220,71 @@ export function SessionDetailModal({
             {/* Kendali Sesi & Presensi */}
             <View style={styles.controlCard}>
               <View style={styles.controlHeaderRow}>
-                <ThemedText style={styles.controlHeading}>Kendali Sesi & Presensi</ThemedText>
+                <ThemedText style={styles.controlHeading}>Kendali Sesi Real-Time</ThemedText>
                 <View style={styles.syncBadge}>
-                  <ThemedText style={styles.syncBadgeText}>Server Sync: 5d lalu</ThemedText>
+                  <ThemedText style={styles.syncBadgeText}>
+                    {isFirestoreConnected ? 'onSnapshot Live' : 'Mode Lokal'}
+                  </ThemedText>
                 </View>
               </View>
+
+              {actionError ? (
+                <View style={{ backgroundColor: '#FEE2E2', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' }}>
+                  <ThemedText style={{ fontSize: 12, color: '#B91C1C', fontWeight: '600' }}>
+                    {actionError}
+                  </ThemedText>
+                </View>
+              ) : null}
+
+              {!isAuthorized ? (
+                <View style={{ backgroundColor: '#FEF3C7', padding: 10, borderRadius: 10 }}>
+                  <ThemedText style={{ fontSize: 12, color: '#92400E', fontWeight: '600' }}>
+                    Hanya Asprak yang ditugaskan pada sesi ini yang dapat membuka atau menutup sesi.
+                  </ThemedText>
+                </View>
+              ) : null}
 
               <View style={styles.controlBtnRow}>
                 <View style={styles.geofenceActivePill}>
                   <Feather name="compass" size={14} color={LaboraColors.primary} style={{ marginRight: 6 }} />
-                  <ThemedText style={styles.geofenceActiveText}>Geofence (30m)</ThemedText>
+                  <ThemedText style={styles.geofenceActiveText}>
+                    Radius {relatedLab?.radius ?? 30}m
+                  </ThemedText>
                 </View>
 
                 <Pressable
-                  disabled={isUpdating}
+                  disabled={isUpdating || !isAuthorized}
                   onPress={handleToggleWithConfirmation}
                   style={[
                     styles.toggleStatusBtn,
                     isOpen ? styles.toggleCloseBtn : styles.toggleOpenBtn,
+                    (isUpdating || !isAuthorized) && { opacity: 0.55 },
                   ]}>
-                  <Feather
-                    name={isOpen ? 'stop-circle' : 'play-circle'}
-                    size={14}
-                    color={isOpen ? '#991B1B' : '#047857'}
-                    style={{ marginRight: 6 }}
-                  />
+                  {isUpdating ? (
+                    <ActivityIndicator size="small" color={isOpen ? '#991B1B' : '#047857'} style={{ marginRight: 6 }} />
+                  ) : (
+                    <Feather
+                      name={isOpen ? 'stop-circle' : 'play-circle'}
+                      size={14}
+                      color={isOpen ? '#991B1B' : '#047857'}
+                      style={{ marginRight: 6 }}
+                    />
+                  )}
                   <ThemedText
                     style={[
                       styles.toggleStatusText,
                       isOpen ? styles.toggleCloseText : styles.toggleOpenText,
                     ]}>
-                    {isOpen ? 'Tutup Sesi' : 'Buka Sesi'}
+                    {isUpdating ? 'Memproses...' : isOpen ? 'Tutup Sesi' : 'Buka Sesi'}
                   </ThemedText>
                 </Pressable>
-              </View>
-
-              <View style={styles.switchRow}>
-                <View style={styles.switchTextCol}>
-                  <ThemedText style={styles.switchTitle}>Toleransi GPS Manual</ThemedText>
-                  <ThemedText style={styles.switchSubtitle}>
-                    Izinkan verifikasi foto praktikan saat akurasi satelit rendah
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={allowManualGps}
-                  onValueChange={setAllowManualGps}
-                  trackColor={{ false: '#E2E8F0', true: LaboraColors.primary }}
-                  thumbColor="#FFFFFF"
-                />
               </View>
             </View>
 
             {/* Ringkasan Kehadiran */}
             <View style={styles.summaryCard}>
               <View style={styles.summaryHeaderRow}>
-                <ThemedText style={styles.summaryHeading}>Ringkasan Kehadiran</ThemedText>
+                <ThemedText style={styles.summaryHeading}>Monitoring Kehadiran</ThemedText>
                 <ThemedText style={styles.summaryTotalText}>Total: {totalCount} Praktikan</ThemedText>
               </View>
 
@@ -309,7 +292,7 @@ export function SessionDetailModal({
                 <ThemedText style={styles.rateNumber}>{tingkatHadirPct}%</ThemedText>
                 <ThemedText style={styles.rateLabel}>Tingkat Hadir</ThemedText>
                 <View style={styles.targetBadge}>
-                  <ThemedText style={styles.targetBadgeText}>Target Lab ≥ 80%</ThemedText>
+                  <ThemedText style={styles.targetBadgeText}>Terlambat: {lateCount}</ThemedText>
                 </View>
               </View>
 
@@ -321,22 +304,22 @@ export function SessionDetailModal({
               {/* 4 Mini boxes */}
               <View style={styles.fourBoxGrid}>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>{hadirCount}</ThemedText>
-                  <ThemedText style={styles.statBoxLabel}>Hadir</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{presentCount}</ThemedText>
+                  <ThemedText style={styles.statBoxLabel}>PRESENT</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>{belumCount}</ThemedText>
-                  <ThemedText style={styles.statBoxLabel}>Belum Presensi</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{lateCount}</ThemedText>
+                  <ThemedText style={styles.statBoxLabel}>Terlambat</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>{izinCount}</ThemedText>
-                  <ThemedText style={styles.statBoxLabel}>Izin Sah</ThemedText>
+                  <ThemedText style={styles.statBoxNumber}>{excusedCount}</ThemedText>
+                  <ThemedText style={styles.statBoxLabel}>EXCUSED</ThemedText>
                 </View>
                 <View style={styles.statBox}>
-                  <ThemedText style={styles.statBoxNumber}>
-                    {sessionPermissions.filter((p) => p.category === 'SAKIT').length}
+                  <ThemedText style={styles.statBoxNumber}>{absentCount}</ThemedText>
+                  <ThemedText style={styles.statBoxLabel}>
+                    {effectiveStatus === 'CLOSED' ? 'ABSENT' : 'Belum'}
                   </ThemedText>
-                  <ThemedText style={styles.statBoxLabel}>Sakit</ThemedText>
                 </View>
               </View>
             </View>
@@ -363,139 +346,166 @@ export function SessionDetailModal({
                 </ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => setSelectedFilter('HADIR')}
-                style={[styles.filterPill, selectedFilter === 'HADIR' && styles.filterPillActive]}>
-                <ThemedText style={[styles.filterPillText, selectedFilter === 'HADIR' && styles.filterPillTextActive]}>
-                  Hadir ({hadirCount})
+                onPress={() => setSelectedFilter('PRESENT')}
+                style={[styles.filterPill, selectedFilter === 'PRESENT' && styles.filterPillActive]}>
+                <ThemedText style={[styles.filterPillText, selectedFilter === 'PRESENT' && styles.filterPillTextActive]}>
+                  PRESENT ({presentCount})
                 </ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => setSelectedFilter('BELUM')}
-                style={[styles.filterPill, selectedFilter === 'BELUM' && styles.filterPillActive]}>
-                <ThemedText style={[styles.filterPillText, selectedFilter === 'BELUM' && styles.filterPillTextActive]}>
-                  Belum ({belumCount})
+                onPress={() => setSelectedFilter('EXCUSED')}
+                style={[styles.filterPill, selectedFilter === 'EXCUSED' && styles.filterPillActive]}>
+                <ThemedText style={[styles.filterPillText, selectedFilter === 'EXCUSED' && styles.filterPillTextActive]}>
+                  EXCUSED ({excusedCount})
                 </ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => setSelectedFilter('IZIN')}
-                style={[styles.filterPill, selectedFilter === 'IZIN' && styles.filterPillActive]}>
-                <ThemedText style={[styles.filterPillText, selectedFilter === 'IZIN' && styles.filterPillTextActive]}>
-                  Izin ({izinCount})
+                onPress={() => setSelectedFilter('ABSENT')}
+                style={[styles.filterPill, selectedFilter === 'ABSENT' && styles.filterPillActive]}>
+                <ThemedText style={[styles.filterPillText, selectedFilter === 'ABSENT' && styles.filterPillTextActive]}>
+                  {effectiveStatus === 'CLOSED' ? `ABSENT (${absentCount})` : `Belum (${absentCount})`}
                 </ThemedText>
               </Pressable>
             </View>
 
-            {/* Daftar Kehadiran GPS */}
+            {/* Daftar Kehadiran Real-Time */}
             <View style={styles.studentListSection}>
               <View style={styles.listHeaderRow}>
-                <ThemedText style={styles.listSectionTitle}>DAFTAR KEHADIRAN GPS</ThemedText>
-                <ThemedText style={styles.listSortTitle}>Tersinkronisasi Real-time</ThemedText>
+                <ThemedText style={styles.listSectionTitle}>DAFTAR PRAKTIKAN REAL-TIME</ThemedText>
+                <ThemedText style={styles.listSortTitle}>
+                  {statusLogs.length > 0 ? `${statusLogs.length} log status` : 'onSnapshot Live'}
+                </ThemedText>
               </View>
 
               {filteredStudentList.length === 0 ? (
                 <View style={{ padding: 24, alignItems: 'center' }}>
                   <Feather name="inbox" size={32} color={LaboraColors.textMuted} style={{ marginBottom: 8 }} />
                   <ThemedText style={{ fontSize: 13, color: LaboraColors.textMuted }}>
-                    Tidak ada data praktikan yang sesuai filter.
+                    Tidak ada praktikan yang sesuai filter.
                   </ThemedText>
                 </View>
               ) : null}
 
-              {filteredStudentList.map((stu) => (
-                <View key={stu.id} style={styles.studentCard}>
-                  <View style={styles.studentTopRow}>
-                    <View style={styles.studentAvatar}>
-                      <ThemedText style={styles.studentAvatarText}>{stu.initial}</ThemedText>
-                    </View>
-                    <View style={styles.studentInfoCol}>
-                      <ThemedText style={styles.studentName}>{stu.name}</ThemedText>
-                      <ThemedText style={styles.studentNim}>NIM {stu.nim}</ThemedText>
-                    </View>
-                    <View
-                      style={[
-                        styles.statusPill,
-                        stu.status === 'TEPAT_WAKTU' || stu.status === 'HADIR'
-                          ? styles.statusHadir
-                          : stu.status === 'IZIN'
-                            ? styles.statusIzin
-                            : stu.status === 'BELUM'
-                              ? styles.statusBelum
-                              : styles.statusWarn,
-                      ]}>
-                      <ThemedText
-                        style={[
-                          styles.statusText,
-                          stu.status === 'TEPAT_WAKTU' || stu.status === 'HADIR'
-                            ? styles.statusHadirText
-                            : stu.status === 'IZIN'
-                              ? styles.statusIzinText
-                              : stu.status === 'BELUM'
-                                ? styles.statusBelumText
-                                : styles.statusWarnText,
-                        ]}>
-                        {stu.status === 'TEPAT_WAKTU'
-                          ? '✓ Tepat Waktu'
-                          : stu.status === 'HADIR'
-                            ? '✓ Hadir'
-                            : stu.status === 'IZIN'
-                              ? 'Izin'
-                              : stu.status === 'BELUM'
-                                ? 'Belum Presensi'
-                                : 'Luar Geofence'}
-                      </ThemedText>
-                    </View>
-                  </View>
+              {filteredStudentList.map((stu) => {
+                const initials =
+                  stu.name
+                    .split(' ')
+                    .map((n) => n[0])
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase() || 'M';
+                const fineMeta = stu.fine ? getFineBadgeMeta(stu.fine.status) : null;
+                const displayAttendanceLabel =
+                  stu.attendanceStatus === 'PENDING_CHECKIN'
+                    ? 'BELUM CHECK-IN'
+                    : stu.attendanceStatus;
 
-                  {stu.status === 'IZIN' ? (
-                    <View style={styles.attachmentProofRow}>
-                      <Feather name="file-text" size={13} color={LaboraColors.primary} />
-                      <ThemedText style={styles.attachmentProofText}>{stu.attachment}</ThemedText>
+                return (
+                  <View key={stu.studentId} style={styles.studentCard}>
+                    <View style={styles.studentTopRow}>
+                      <View style={styles.studentAvatar}>
+                        <ThemedText style={styles.studentAvatarText}>{initials}</ThemedText>
+                      </View>
+                      <View style={styles.studentInfoCol}>
+                        <ThemedText style={styles.studentName}>{stu.name}</ThemedText>
+                        <ThemedText style={styles.studentNim}>NIM: {stu.nim}</ThemedText>
+                      </View>
+                      <View
+                        style={[
+                          styles.statusPill,
+                          stu.attendanceStatus === 'PRESENT'
+                            ? stu.isLate
+                              ? styles.statusWarn
+                              : styles.statusHadir
+                            : stu.attendanceStatus === 'EXCUSED'
+                              ? styles.statusIzin
+                              : styles.statusBelum,
+                        ]}>
+                        <ThemedText
+                          style={[
+                            styles.statusText,
+                            stu.attendanceStatus === 'PRESENT'
+                              ? stu.isLate
+                                ? styles.statusWarnText
+                                : styles.statusHadirText
+                              : stu.attendanceStatus === 'EXCUSED'
+                                ? styles.statusIzinText
+                                : styles.statusBelumText,
+                          ]}>
+                          {displayAttendanceLabel}
+                        </ThemedText>
+                      </View>
                     </View>
-                  ) : stu.status === 'BELUM' ? (
+
                     <View style={styles.studentBottomRow}>
                       <View style={styles.timeMeta}>
                         <Feather name="clock" size={12} color={LaboraColors.textMuted} />
-                        <ThemedText style={styles.timeMetaText}>Menunggu verifikasi presensi</ThemedText>
+                        <ThemedText style={styles.timeMetaText}>
+                          Check-in: {formatCheckInTime(stu.checkedInAt)}
+                        </ThemedText>
                       </View>
-                    </View>
-                  ) : (
-                    <View style={styles.studentBottomRow}>
-                      <View style={styles.timeMeta}>
-                        <Feather name="clock" size={12} color={LaboraColors.textMuted} />
-                        <ThemedText style={styles.timeMetaText}>{stu.time ?? '-'}</ThemedText>
-                      </View>
+
                       <View style={styles.radiusMeta}>
-                        <Feather name="navigation" size={12} color={stu.isWithin ? LaboraColors.primary : '#EF4444'} />
                         <ThemedText
                           style={[
                             styles.radiusMetaText,
-                            !stu.isWithin && styles.radiusMetaWarn,
+                            stu.isLate && styles.radiusMetaWarn,
                           ]}>
-                          Radius: {stu.radius}
+                          {stu.attendanceStatus === 'PRESENT'
+                            ? stu.isLate
+                              ? `Terlambat ${stu.lateMinutes} mnt`
+                              : 'Tepat Waktu'
+                            : stu.attendanceStatus === 'EXCUSED'
+                              ? 'Izin Disetujui'
+                              : stu.attendanceStatus === 'ABSENT'
+                                ? 'Tidak Hadir'
+                                : 'Menunggu Check-in'}
                         </ThemedText>
                       </View>
-                      {!stu.isWithin && (
-                        <View style={styles.manualActionBtn}>
-                          <ThemedText style={styles.manualActionText}>Manual</ThemedText>
-                        </View>
-                      )}
                     </View>
-                  )}
-                </View>
-              ))}
+
+                    {stu.fine && fineMeta ? (
+                      <View
+                        style={[
+                          styles.attachmentProofRow,
+                          { backgroundColor: fineMeta.bg, justifyContent: 'space-between' },
+                        ]}>
+                        <ThemedText style={{ fontSize: 11, fontWeight: '700', color: fineMeta.color }}>
+                          {fineMeta.label} • Rp{stu.fine.amount.toLocaleString('id-ID')}
+                        </ThemedText>
+                        <ThemedText style={{ fontSize: 10, color: fineMeta.color }}>
+                          {stu.fine.reason}
+                        </ThemedText>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
             </View>
           </ScrollView>
 
           {/* Action Footer */}
           <View style={styles.footer}>
             <Pressable style={styles.secondaryActionBtn} onPress={() => setShowQRModal(true)}>
-              <Feather name="check-square" size={16} color={LaboraColors.primary} style={{ marginRight: 6 }} />
-              <ThemedText style={styles.secondaryActionText}>Verifikasi Manual</ThemedText>
+              <Feather name="maximize-2" size={16} color={LaboraColors.primary} style={{ marginRight: 6 }} />
+              <ThemedText style={styles.secondaryActionText}>QR Sesi</ThemedText>
             </Pressable>
 
+            {onEditSession && isAuthorized ? (
+              <Pressable
+                style={styles.secondaryActionBtn}
+                onPress={() => {
+                  onClose();
+                  onEditSession(session);
+                }}>
+                <Feather name="edit-2" size={15} color={LaboraColors.primary} style={{ marginRight: 6 }} />
+                <ThemedText style={styles.secondaryActionText}>Edit Jadwal</ThemedText>
+              </Pressable>
+            ) : null}
+
             <Pressable style={styles.primaryActionBtn} onPress={onClose}>
-              <Feather name="download" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <ThemedText style={styles.primaryActionText}>Unduh BAP Presensi</ThemedText>
+              <Feather name="check" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <ThemedText style={styles.primaryActionText}>Tutup</ThemedText>
             </Pressable>
           </View>
         </View>

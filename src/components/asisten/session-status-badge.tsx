@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
-import type { SessionStatus } from '@/types';
+import type { SessionStatus, Sprint4SessionStatus } from '@/types';
 
 interface SessionStatusBadgeProps {
-  status: SessionStatus;
+  status: SessionStatus | Sprint4SessionStatus;
   size?: 'small' | 'medium';
   isUpdating?: boolean;
 }
@@ -15,27 +15,35 @@ export function SessionStatusBadge({
   isUpdating = false,
 }: SessionStatusBadgeProps) {
   const isOpen = status === 'OPEN';
+  const isScheduled = status === 'SCHEDULED';
 
   return (
     <View
       style={[
         styles.badge,
-        isOpen ? styles.badgeOpen : styles.badgeClosed,
+        isOpen ? styles.badgeOpen : isScheduled ? styles.badgeScheduled : styles.badgeClosed,
         size === 'small' && styles.badgeSmall,
       ]}>
-      <View style={[styles.dot, isOpen ? styles.dotOpen : styles.dotClosed]} />
+      <View
+        style={[
+          styles.dot,
+          isOpen ? styles.dotOpen : isScheduled ? styles.dotScheduled : styles.dotClosed,
+        ]}
+      />
       <ThemedText
         type="smallBold"
         style={[
           styles.text,
-          isOpen ? styles.textOpen : styles.textClosed,
+          isOpen ? styles.textOpen : isScheduled ? styles.textScheduled : styles.textClosed,
           size === 'small' && styles.textSmall,
         ]}>
         {isUpdating
           ? 'MEMPERBARUI...'
           : isOpen
             ? 'SESI DIBUKA (OPEN)'
-            : 'SESI DITUTUP (CLOSED)'}
+            : isScheduled
+              ? 'TERJADWAL (SCHEDULED)'
+              : 'SESI DITUTUP (CLOSED)'}
       </ThemedText>
     </View>
   );
@@ -61,6 +69,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#86EFAC',
   },
+  badgeScheduled: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
   badgeClosed: {
     backgroundColor: '#F1F5F9',
     borderWidth: 1,
@@ -74,6 +87,9 @@ const styles = StyleSheet.create({
   dotOpen: {
     backgroundColor: '#16A34A',
   },
+  dotScheduled: {
+    backgroundColor: '#D97706',
+  },
   dotClosed: {
     backgroundColor: '#64748B',
   },
@@ -86,6 +102,9 @@ const styles = StyleSheet.create({
   },
   textOpen: {
     color: '#15803D',
+  },
+  textScheduled: {
+    color: '#B45309',
   },
   textClosed: {
     color: '#475569',

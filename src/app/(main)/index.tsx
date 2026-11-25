@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -7,14 +7,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { router } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import {
-  SessionCard,
-  confirmSessionStatusChange,
-} from '@/components/asisten/session-card';
 import { ActiveSessionsControlBanner } from '@/components/asisten/active-sessions-banner';
 import {
   ClassCard,
@@ -23,27 +15,39 @@ import {
 import { ClassFormModal } from '@/components/asisten/class-form-modal';
 import { LabCard } from '@/components/asisten/lab-card';
 import { LabFormModal } from '@/components/asisten/lab-form-modal';
-import { SessionFormModal } from '@/components/asisten/session-form-modal';
+import {
+  SessionCard,
+  confirmSessionStatusChange,
+} from '@/components/asisten/session-card';
+import { SessionDetailModal } from '@/components/asisten/session-detail-modal';
 import {
   SessionFilterHeader,
   StatusFilter,
 } from '@/components/asisten/session-filter-header';
-import { SessionDetailModal } from '@/components/asisten/session-detail-modal';
-import { BottomTabInset, MaxContentWidth, Spacing, LaboraColors } from '@/constants/theme';
-import {
-  useSessionContext,
-  SessionWithDetails,
-} from '@/context/session-context';
-import { useAuth } from '@/context/auth-context';
-import { LaboraTopBar } from '@/components/labora/LaboraTopBar';
+import { SessionFormModal } from '@/components/asisten/session-form-modal';
 import { LaboraStatCard } from '@/components/labora/LaboraStatCard';
+import { LaboraTopBar } from '@/components/labora/LaboraTopBar';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { BottomTabInset, LaboraColors, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
+import { SessionWithDetails, useSessionContext } from '@/context/session-context';
+import {
+  filterSessionsForAsprak,
+  getEffectiveSessionStatus,
+} from '@/features/asprak/asprak-dashboard-helpers';
+import { isAsprakRole } from '@/features/asprak/role-utils';
+import { resolveSessionConfigSnapshotOptional } from '@/features/asprak/services/session-snapshot-helpers';
+import { findLabForRoom } from '@/utils/attendance-location';
 import type {
   Lab,
-  LabFormInput,
   LabClass,
   LabClassFormInput,
+  LabFormInput,
   SessionScheduleFormInput,
 } from '@/types';
+import { Feather } from '@expo/vector-icons';
+import { router } from 'expo-router';
 
 type ManagementSubTab = 'SESSIONS' | 'CLASSES' | 'LABS';
 
@@ -55,7 +59,7 @@ export default function HomeScreen() {
     users,
     updatingSessionIds,
     isFirestoreConnected,
-    setCurrentAssistantId,
+    currentAssistantId,
     createClass,
     updateClass,
     deleteClass,
@@ -67,18 +71,22 @@ export default function HomeScreen() {
     getSessionStatusLogs,
     getClassesWithDetails,
     getSessionsWithDetails,
+    getCourseById,
+    getLabById,
+    getSessionRoster,
     labs,
     createLab,
     updateLab,
     deleteLab,
-    permissions,
-    updatePermissionStatus,
+    leaveRequests,
+    actionError,
+    clearActionError,
+    loading,
+    error,
   } = useSessionContext();
   const { profile, logout } = useAuth();
-  const { loading, error } = useSessionContext();
 
   const [activeSubTab, setActiveSubTab] = useState<ManagementSubTab>('SESSIONS');
-  const [selectedAssistantId, setSelectedAssistantId] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [activeModalSession, setActiveModalSession] = useState<SessionWithDetails | null>(
     null
@@ -98,80 +106,91 @@ export default function HomeScreen() {
   const [isLabFormVisible, setIsLabFormVisible] = useState(false);
   const [editingLab, setEditingLab] = useState<Lab | null>(null);
 
+  const loggedInAsprakId = profile?.id ?? currentAssistantId;
+
   const assistants = useMemo(
-    () => users.filter((u) => u.role === 'asisten'),
+    () => users.filter((u) => isAsprakRole(u.role)),
     [users]
   );
 
   const activeAssistant = useMemo(
-    () => assistants.find((a) => a.id === selectedAssistantId),
-    [assistants, selectedAssistantId]
+    () => profile ?? assistants.find((a) => a.id === loggedInAsprakId),
+    [profile, assistants, loggedInAsprakId]
   );
-
-  const handleSelectAssistant = (id: string) => {
-    setSelectedAssistantId(id);
-    if (id !== 'ALL') {
-      setCurrentAssistantId(id);
-    }
-  };
 
   const allClassesWithDetails = getClassesWithDetails();
   const allSessionsWithDetails = getSessionsWithDetails();
 
-  // Sesi yang sedang berstatus OPEN (SRS-08)
-  const openSessions = useMemo(
-    () => allSessionsWithDetails.filter((s) => s.status === 'OPEN'),
-    [allSessionsWithDetails]
+  // Hanya tampilkan sesi yang ditugaskan kepada Asprak yang sedang login
+  const assignedSessions = useMemo(
+    () => filterSessionsForAsprak(allSessionsWithDetails, loggedInAsprakId),
+    [allSessionsWithDetails, loggedInAsprakId]
   );
 
-  // Total praktikan terdaftar
+  const scheduledSessions = useMemo(
+    () => assignedSessions.filter((s) => getEffectiveSessionStatus(s) === 'SCHEDULED'),
+    [assignedSessions]
+  );
+
+  const openSessions = useMemo(
+    () => assignedSessions.filter((s) => getEffectiveSessionStatus(s) === 'OPEN'),
+    [assignedSessions]
+  );
+
+  const closedSessions = useMemo(
+    () => assignedSessions.filter((s) => getEffectiveSessionStatus(s) === 'CLOSED'),
+    [assignedSessions]
+  );
+
+  // Total praktikan relevan pada sesi Asprak (diambil dari data nyata, tanpa angka dummy)
   const totalStudentsCount = useMemo(() => {
-    const students = users.filter((u) => u.role === 'praktikan');
-    return students.length > 0 ? students.length : 78;
-  }, [users]);
+    const uniqueStudentIds = new Set<string>();
+    for (const sess of assignedSessions) {
+      for (const item of getSessionRoster(sess.id)) {
+        uniqueStudentIds.add(item.studentId);
+      }
+    }
+    return uniqueStudentIds.size;
+  }, [assignedSessions, getSessionRoster]);
 
-  // Izin yang menunggu review
-  const pendingPermissions = useMemo(() => {
-    return permissions.filter((p) => p.status === 'PENDING');
-  }, [permissions]);
+  // Izin yang menunggu review pada sesi milik Asprak ini
+  const pendingLeavesForAsprak = useMemo(() => {
+    const mySessionIds = new Set(assignedSessions.map((s) => s.id));
+    return leaveRequests.filter(
+      (l) => l.status === 'PENDING' && mySessionIds.has(l.sessionId)
+    );
+  }, [leaveRequests, assignedSessions]);
 
-  // Hitung jumlah statistik sesi
-  const counts = useMemo(() => {
-    const relevantSessions =
-      selectedAssistantId === 'ALL'
-        ? allSessionsWithDetails
-        : allSessionsWithDetails.filter((s) => s.assistantId === selectedAssistantId);
+  const counts = useMemo(
+    () => ({
+      total: assignedSessions.length,
+      scheduled: scheduledSessions.length,
+      open: openSessions.length,
+      closed: closedSessions.length,
+    }),
+    [assignedSessions.length, scheduledSessions.length, openSessions.length, closedSessions.length]
+  );
 
-    const total = relevantSessions.length;
-    const open = relevantSessions.filter((s) => s.status === 'OPEN').length;
-    const closed = relevantSessions.filter((s) => s.status === 'CLOSED').length;
-    return { total, open, closed };
-  }, [allSessionsWithDetails, selectedAssistantId]);
-
-  // Filter daftar sesi berdasarkan asisten dan status
+  // Filter daftar sesi berdasarkan status (SCHEDULED / OPEN / CLOSED)
   const filteredSessions = useMemo(() => {
-    return allSessionsWithDetails.filter((s) => {
-      const matchAssistant =
-        selectedAssistantId === 'ALL' || s.assistantId === selectedAssistantId;
-      const matchStatus =
-        statusFilter === 'ALL' || s.status === statusFilter;
-      return matchAssistant && matchStatus;
+    return assignedSessions.filter((s) => {
+      if (statusFilter === 'ALL') return true;
+      return getEffectiveSessionStatus(s) === statusFilter;
     });
-  }, [allSessionsWithDetails, selectedAssistantId, statusFilter]);
+  }, [assignedSessions, statusFilter]);
 
-  // Filter daftar kelas berdasarkan asisten
+  // Filter daftar kelas berdasarkan Asprak yang sedang login
   const filteredClasses = useMemo(() => {
-    if (selectedAssistantId === 'ALL') return allClassesWithDetails;
-    return allClassesWithDetails.filter((c) => c.assistantId === selectedAssistantId);
-  }, [allClassesWithDetails, selectedAssistantId]);
+    return allClassesWithDetails.filter((c) => c.assistantId === loggedInAsprakId);
+  }, [allClassesWithDetails, loggedInAsprakId]);
 
-  // Sync active modal session jika datanya berubah saat modal terbuka
+  // Sync active modal session jika datanya berubah secara real-time saat modal terbuka
   const currentModalSession = useMemo(() => {
     if (!activeModalSession) return null;
     return (
-      allSessionsWithDetails.find((s) => s.id === activeModalSession.id) ?? null
+      assignedSessions.find((s) => s.id === activeModalSession.id) ?? null
     );
-  }, [allSessionsWithDetails, activeModalSession]);
+  }, [assignedSessions, activeModalSession]);
 
   const currentModalLogs = useMemo(() => {
     if (!currentModalSession) return [];
@@ -186,22 +205,24 @@ export default function HomeScreen() {
     setActiveModalSession(null);
   };
 
-  // SRS-08: Handler Toggle Status Sesi dengan pencatatan identitas asisten aktif
+  // SRS-08 & Sprint 4: Toggle status sesi menggunakan identitas Asprak yang sedang login
   const handleToggleStatus = (sessionId: string) => {
-    toggleSessionStatus(sessionId, selectedAssistantId);
+    void toggleSessionStatus(sessionId, loggedInAsprakId);
   };
 
   const handleBannerCloseSingle = (session: SessionWithDetails) => {
     confirmSessionStatusChange({
       session,
-      selectedAssistantId,
+      selectedAssistantId: loggedInAsprakId,
       activeAssistant,
-      onConfirm: () => toggleSessionStatus(session.id, selectedAssistantId),
+      onConfirm: () => {
+        void toggleSessionStatus(session.id, loggedInAsprakId);
+      },
     });
   };
 
   const handleCloseAllOpenSessions = () => {
-    closeAllOpenSessions('ALL', selectedAssistantId);
+    void closeAllOpenSessions(loggedInAsprakId, loggedInAsprakId);
   };
 
   // Handlers CRUD Kelas (SRS-07)
@@ -272,8 +293,41 @@ export default function HomeScreen() {
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
   };
 
-  // Current primary active session for Screen 1 Hero
-  const primaryLiveSession = openSessions[0] ?? allSessionsWithDetails[0] ?? null;
+  // Current primary active session for Screen 1 Hero (strictly from assigned sessions)
+  const primaryLiveSession =
+    openSessions[0] ?? scheduledSessions[0] ?? assignedSessions[0] ?? null;
+  const primaryRoster = useMemo(
+    () => (primaryLiveSession ? getSessionRoster(primaryLiveSession.id) : []),
+    [primaryLiveSession, getSessionRoster]
+  );
+  const primaryPresentCount = useMemo(
+    () => primaryRoster.filter((r) => r.attendanceStatus === 'PRESENT').length,
+    [primaryRoster]
+  );
+  const primaryAttendancePct =
+    primaryRoster.length > 0
+      ? Math.round((primaryPresentCount / primaryRoster.length) * 1000) / 10
+      : 0;
+  const primaryCourse = primaryLiveSession
+    ? getCourseById(primaryLiveSession.courseId)
+    : undefined;
+  const primaryLab = primaryLiveSession
+    ? (primaryLiveSession.labId ? getLabById(primaryLiveSession.labId) : undefined) ??
+      findLabForRoom(labs, primaryLiveSession.schedule?.room)
+    : undefined;
+  const primaryConfigSnapshot = primaryLiveSession
+    ? resolveSessionConfigSnapshotOptional(primaryLab, primaryLiveSession.configSnapshot)
+    : null;
+  const primaryEffectiveStatus = primaryLiveSession
+    ? getEffectiveSessionStatus(primaryLiveSession)
+    : null;
+  const nextPendingLeave = pendingLeavesForAsprak[0] ?? null;
+  const nextPendingStudent = nextPendingLeave
+    ? users.find((u) => u.id === nextPendingLeave.userId)
+    : undefined;
+  const nextPendingSession = nextPendingLeave
+    ? assignedSessions.find((s) => s.id === nextPendingLeave.sessionId)
+    : undefined;
 
   return (
     <ScrollView
@@ -288,31 +342,46 @@ export default function HomeScreen() {
       <View style={styles.container}>
         {/* 1. Google Stitch LABORA TopBar */}
         <LaboraTopBar
-          title="Beranda"
-          subtitle="Fakultas Sains & Matematika"
-          roleBadge="⇄ Asprak"
-          userName={profile?.name ?? 'Asisten Lab'}
+          title="Dashboard Asprak"
+          subtitle={profile?.email ?? 'Portal Asisten Praktikum'}
+          roleBadge="Asprak"
+          userName={profile?.name ?? 'Asisten Praktikum'}
           isOnline={isFirestoreConnected}
-          onRoleBadgePress={() => router.push('/(main)/praktikan' as any)}
+          onRoleBadgePress={() => router.push('/explore' as any)}
           onProfilePress={() => void logout()}
         />
 
-        {/* 2. 4 Stat Cards Grid (2x2) sesuai Screen 1 Google Stitch */}
+        {/* Error Banner (Firestore atau Aksi Sesi) */}
+        {(actionError || error) ? (
+          <View style={styles.errorBanner}>
+            <Feather name="alert-circle" size={16} color={LaboraColors.danger} style={{ marginTop: 2 }} />
+            <ThemedText style={styles.errorBannerText}>
+              {actionError ?? error}
+            </ThemedText>
+            {actionError ? (
+              <Pressable onPress={clearActionError} style={styles.errorDismissBtn}>
+                <Feather name="x" size={14} color={LaboraColors.danger} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* 2. 4 Stat Cards Grid (2x2) berbasis data nyata Asprak */}
         <View style={styles.statGrid}>
           <View style={styles.statRow}>
             <View style={styles.statCol}>
               <LaboraStatCard
-                value={Math.max(3, allSessionsWithDetails.length)}
-                label="Total Sesi Lab"
-                subLabel="Hari Ini"
+                value={assignedSessions.length}
+                label="Sesi Ditugaskan"
+                subLabel={`${scheduledSessions.length} Terjadwal`}
                 iconName="calendar"
               />
             </View>
             <View style={styles.statCol}>
               <LaboraStatCard
-                value={openSessions.length > 0 ? openSessions.length : 1}
+                value={openSessions.length}
                 label="Sesi Berlangsung"
-                badgeText="LIVE"
+                badgeText={openSessions.length > 0 ? 'LIVE' : 'IDLE'}
                 badgeType="live"
                 iconName="activity"
               />
@@ -323,7 +392,7 @@ export default function HomeScreen() {
             <View style={styles.statCol}>
               <LaboraStatCard
                 value={totalStudentsCount}
-                label="Total Praktikan"
+                label="Praktikan Terdaftar"
                 badgeText="Aktif"
                 badgeType="active"
                 iconName="users"
@@ -331,9 +400,9 @@ export default function HomeScreen() {
             </View>
             <View style={styles.statCol}>
               <LaboraStatCard
-                value={pendingPermissions.length > 0 ? pendingPermissions.length : 4}
+                value={pendingLeavesForAsprak.length}
                 label="Izin Menunggu"
-                badgeText="Review"
+                badgeText={pendingLeavesForAsprak.length > 0 ? 'Review' : 'Aman'}
                 badgeType="review"
                 iconName="clipboard"
               />
@@ -341,51 +410,65 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* 3. Hero Card: "SESI BERLANGSUNG SEKARANG" (Screen 1 Stitch) */}
+        {/* 3. Hero Card: Sesi Utama Milik Asprak */}
         {primaryLiveSession ? (
           <View style={styles.heroCard}>
             {/* Top row: Status dot + Time pill */}
             <View style={styles.heroTopRow}>
               <View style={styles.liveIndicatorRow}>
-                <View style={styles.liveDot} />
+                <View
+                  style={[
+                    styles.liveDot,
+                    primaryEffectiveStatus !== 'OPEN' && {
+                      backgroundColor:
+                        primaryEffectiveStatus === 'SCHEDULED'
+                          ? LaboraColors.warning
+                          : LaboraColors.textMuted,
+                    },
+                  ]}
+                />
                 <ThemedText style={styles.liveLabel}>
-                  {primaryLiveSession.status === 'OPEN'
+                  {primaryEffectiveStatus === 'OPEN'
                     ? 'SESI BERLANGSUNG SEKARANG'
-                    : 'SESI BERIKUTNYA'}
+                    : primaryEffectiveStatus === 'SCHEDULED'
+                      ? 'SESI TERJADWAL BERIKUTNYA'
+                      : 'SESI TERAKHIR SELESAI'}
                 </ThemedText>
               </View>
               <View style={styles.heroTimePill}>
                 <Feather name="clock" size={13} color="#047857" style={{ marginRight: 4 }} />
                 <ThemedText style={styles.heroTimeText}>
-                  {primaryLiveSession.schedule?.startTime ?? '09:30'} - {primaryLiveSession.schedule?.endTime ?? '12:00'} WIB
+                  {primaryLiveSession.schedule?.startTime ?? '-'} - {primaryLiveSession.schedule?.endTime ?? '-'} WIB
                 </ThemedText>
               </View>
             </View>
 
-            {/* Course & Class Info */}
+            {/* Course & Lab Info */}
             <ThemedText style={styles.heroCourseTitle}>
-              {primaryLiveSession.schedule?.title ?? 'Jaringan Komputer Lanjut'}
+              {primaryCourse?.name ?? primaryLiveSession.schedule?.title ?? 'Sesi Praktikum'}
             </ThemedText>
 
             <View style={styles.heroMetaRow}>
-              {primaryLiveSession.schedule?.courseCode ? (
+              {(primaryCourse?.code || primaryLiveSession.schedule?.courseCode) ? (
                 <View style={styles.heroCodeBadge}>
                   <ThemedText style={styles.heroCodeText}>
-                    {primaryLiveSession.schedule.courseCode}
+                    {primaryCourse?.code ?? primaryLiveSession.schedule?.courseCode}
                   </ThemedText>
                 </View>
               ) : null}
-              <View style={styles.heroMetaItem}>
-                <Feather name="book" size={13} color={LaboraColors.textMuted} />
-                <ThemedText style={styles.heroMetaText}>
-                  Kelas {primaryLiveSession.schedule?.className ?? 'TI-3A'}
-                </ThemedText>
-              </View>
+              {primaryLiveSession.schedule?.className ? (
+                <View style={styles.heroMetaItem}>
+                  <Feather name="book" size={13} color={LaboraColors.textMuted} />
+                  <ThemedText style={styles.heroMetaText}>
+                    {primaryLiveSession.schedule.className}
+                  </ThemedText>
+                </View>
+              ) : null}
               <ThemedText style={styles.heroMetaDot}>•</ThemedText>
               <View style={styles.heroMetaItem}>
                 <Feather name="map-pin" size={13} color={LaboraColors.textMuted} />
                 <ThemedText style={styles.heroMetaText}>
-                  {primaryLiveSession.schedule?.room ?? 'Lab Cyber Lt. 3'}
+                  {primaryLab?.name ?? primaryLiveSession.schedule?.room ?? 'Lab belum ditentukan'}
                 </ThemedText>
               </View>
             </View>
@@ -401,22 +484,33 @@ export default function HomeScreen() {
                 </View>
                 <ThemedText style={styles.attendanceProgressNumbers}>
                   <ThemedText style={styles.attendanceProgressBold}>
-                    {primaryLiveSession.attendanceCount ?? 26}
-                  </ThemedText> / 30 Mahasiswa (86.7%)
+                    {primaryPresentCount}
+                  </ThemedText> / {primaryRoster.length} Mahasiswa ({primaryAttendancePct}%)
                 </ThemedText>
               </View>
 
               {/* Progress bar track */}
               <View style={styles.progressBarTrack}>
-                <View style={[styles.progressBarFill, { width: '86.7%' }]} />
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${Math.min(100, primaryAttendancePct)}%` },
+                  ]}
+                />
               </View>
 
               <View style={styles.progressFooterRow}>
-                <ThemedText style={styles.progressToleranceText}>
-                  Toleransi Keterlambatan: 15 mnt
+                <ThemedText
+                  style={[
+                    styles.progressToleranceText,
+                    !primaryConfigSnapshot && { color: LaboraColors.danger },
+                  ]}>
+                  {primaryConfigSnapshot
+                    ? `Toleransi: ${primaryConfigSnapshot.gracePeriodMinutes} mnt • Denda Rp${primaryConfigSnapshot.lateFineAmount.toLocaleString('id-ID')}`
+                    : 'Aturan toleransi & denda Lab belum dikonfigurasi Aslab'}
                 </ThemedText>
                 <ThemedText style={styles.progressRemainingText}>
-                  Tersisa 4 praktikan
+                  Belum hadir: {Math.max(0, primaryRoster.length - primaryPresentCount)}
                 </ThemedText>
               </View>
             </View>
@@ -431,65 +525,79 @@ export default function HomeScreen() {
               </Pressable>
 
               <Pressable
-                style={styles.heroSecondaryBtn}
+                disabled={updatingSessionIds.includes(primaryLiveSession.id)}
+                style={[
+                  styles.heroSecondaryBtn,
+                  updatingSessionIds.includes(primaryLiveSession.id) && { opacity: 0.6 },
+                ]}
                 onPress={() => handleBannerCloseSingle(primaryLiveSession)}>
-                <Feather name="stop-circle" size={16} color={LaboraColors.primary} style={{ marginRight: 6 }} />
+                <Feather
+                  name={primaryEffectiveStatus === 'OPEN' ? 'stop-circle' : 'play-circle'}
+                  size={16}
+                  color={LaboraColors.primary}
+                  style={{ marginRight: 6 }}
+                />
                 <ThemedText style={styles.heroSecondaryBtnText}>
-                  {primaryLiveSession.status === 'OPEN' ? 'Tutup Sesi' : 'Buka Sesi'}
+                  {updatingSessionIds.includes(primaryLiveSession.id)
+                    ? 'Memproses...'
+                    : primaryEffectiveStatus === 'OPEN'
+                      ? 'Tutup Sesi'
+                      : 'Buka Sesi'}
                 </ThemedText>
               </Pressable>
             </View>
           </View>
         ) : null}
 
-        {/* 4. Quick Approval Alert: "PERLU PERSETUJUAN" (Screen 1 Stitch) */}
-        <View style={styles.quickApprovalCard}>
-          <View style={styles.quickApprovalAccent} />
-          <View style={styles.quickApprovalBody}>
-            <View style={styles.quickApprovalTopRow}>
-              <View style={styles.quickApprovalIconCircle}>
-                <Feather name="briefcase" size={16} color={LaboraColors.warning} />
-              </View>
-              <View style={styles.quickApprovalHeaderCol}>
-                <View style={styles.quickApprovalBadgeRow}>
-                  <ThemedText style={styles.quickApprovalTag}>PERLU PERSETUJUAN</ThemedText>
-                  <ThemedText style={styles.quickApprovalTime}>10 mnt lalu</ThemedText>
+        {/* 4. Quick Approval Alert: Berbasis data nyata izin yang menunggu */}
+        {nextPendingLeave ? (
+          <View style={styles.quickApprovalCard}>
+            <View style={styles.quickApprovalAccent} />
+            <View style={styles.quickApprovalBody}>
+              <View style={styles.quickApprovalTopRow}>
+                <View style={styles.quickApprovalIconCircle}>
+                  <Feather name="briefcase" size={16} color={LaboraColors.warning} />
                 </View>
-                <ThemedText style={styles.quickApprovalName}>
-                  Ahmad Fauzi (210401032)
-                </ThemedText>
+                <View style={styles.quickApprovalHeaderCol}>
+                  <View style={styles.quickApprovalBadgeRow}>
+                    <ThemedText style={styles.quickApprovalTag}>PERLU PERSETUJUAN ({pendingLeavesForAsprak.length})</ThemedText>
+                    <ThemedText style={styles.quickApprovalTime}>
+                      {nextPendingLeave.category}
+                    </ThemedText>
+                  </View>
+                  <ThemedText style={styles.quickApprovalName}>
+                    {nextPendingLeave.userName} {nextPendingStudent?.nim ? `(${nextPendingStudent.nim})` : ''}
+                  </ThemedText>
+                </View>
               </View>
-            </View>
 
-            <ThemedText style={styles.quickApprovalReason} numberOfLines={2}>
-              Izin Sakit: Surat Dokter terlampir • Praktikum Jarkom Modul 4 (Subnetting & VLAN).
-            </ThemedText>
+              <ThemedText style={styles.quickApprovalReason} numberOfLines={2}>
+                {nextPendingSession?.schedule?.title ? `${nextPendingSession.schedule.title}: ` : ''}
+                {nextPendingLeave.reason}
+              </ThemedText>
 
-            <View style={styles.quickApprovalBtnRow}>
-              <Pressable
-                style={styles.quickApproveBtn}
-                onPress={() => {
-                  if (pendingPermissions.length > 0) {
-                    updatePermissionStatus(pendingPermissions[0].id, 'APPROVED');
-                  }
-                }}>
-                <Feather name="check" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                <ThemedText style={styles.quickApproveBtnText}>Setujui Izin</ThemedText>
-              </Pressable>
-
-              <Pressable
-                style={styles.quickAttachmentBtn}
-                onPress={() => router.push('/(main)/izin' as any)}>
-                <Feather name="eye" size={14} color={LaboraColors.textSecondary} style={{ marginRight: 4 }} />
-                <ThemedText style={styles.quickAttachmentBtnText}>Lampiran</ThemedText>
-              </Pressable>
+              <View style={styles.quickApprovalBtnRow}>
+                <Pressable
+                  style={styles.quickApproveBtn}
+                  onPress={() => router.push('/explore' as any)}>
+                  <Feather name="check-square" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                  <ThemedText style={styles.quickApproveBtnText}>Tinjau & Putuskan</ThemedText>
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.quickApprovalEmpty}>
+            <Feather name="check-circle" size={16} color={LaboraColors.successDark} />
+            <ThemedText style={styles.quickApprovalEmptyText}>
+              Tidak ada permohonan izin yang menunggu review pada sesi Anda.
+            </ThemedText>
+          </View>
+        )}
 
-        {/* 5. Aksi Cepat Asisten Lab */}
+        {/* 5. Aksi Cepat Asprak */}
         <View style={styles.quickAccessSection}>
-          <ThemedText style={styles.sectionHeading}>Aksi Cepat Asisten</ThemedText>
+          <ThemedText style={styles.sectionHeading}>Aksi Cepat Asprak</ThemedText>
           <View style={styles.quickAccessRow}>
             <Pressable
               style={styles.quickActionItem}
@@ -502,23 +610,20 @@ export default function HomeScreen() {
 
             <Pressable
               style={styles.quickActionItem}
+              onPress={() => router.push('/explore' as any)}>
+              <View style={styles.quickActionCircle}>
+                <Feather name="check-circle" size={20} color={LaboraColors.textSecondary} />
+              </View>
+              <ThemedText style={styles.quickActionLabel}>Approval Izin</ThemedText>
+            </Pressable>
+
+            <Pressable
+              style={styles.quickActionItem}
               onPress={handleOpenCreateClass}>
               <View style={styles.quickActionCircle}>
                 <Feather name="book-open" size={20} color={LaboraColors.textSecondary} />
               </View>
               <ThemedText style={styles.quickActionLabel}>Buat Kelas</ThemedText>
-            </Pressable>
-
-            <Pressable
-              style={styles.quickActionItem}
-              onPress={() => {
-                setEditingLab(null);
-                setIsLabFormVisible(true);
-              }}>
-              <View style={styles.quickActionCircle}>
-                <Feather name="grid" size={20} color={LaboraColors.textSecondary} />
-              </View>
-              <ThemedText style={styles.quickActionLabel}>Tambah Lab</ThemedText>
             </Pressable>
 
             <Pressable
@@ -546,7 +651,7 @@ export default function HomeScreen() {
                 styles.subTabText,
                 activeSubTab === 'SESSIONS' && styles.subTabTextActive,
               ]}>
-              📅 Jadwal Sesi ({allSessionsWithDetails.length})
+              📅 Sesi Saya ({assignedSessions.length})
             </ThemedText>
           </Pressable>
 
@@ -562,7 +667,7 @@ export default function HomeScreen() {
                 styles.subTabText,
                 activeSubTab === 'CLASSES' && styles.subTabTextActive,
               ]}>
-              🏫 Data Kelas ({allClassesWithDetails.length})
+              🏫 Kelas Saya ({filteredClasses.length})
             </ThemedText>
           </Pressable>
 
@@ -587,10 +692,11 @@ export default function HomeScreen() {
         {activeSubTab !== 'LABS' ? (
           <SessionFilterHeader
             assistants={assistants}
-            selectedAssistantId={selectedAssistantId}
-            onSelectAssistant={handleSelectAssistant}
+            selectedAssistantId={loggedInAsprakId}
+            onSelectAssistant={() => {}}
             statusFilter={statusFilter}
             onSelectStatusFilter={setStatusFilter}
+            showAssistantFilter={false}
             counts={counts}
           />
         ) : null}
@@ -601,7 +707,7 @@ export default function HomeScreen() {
             {/* SRS-08: Banner Kontrol Cepat Sesi Aktif (OPEN) */}
             <ActiveSessionsControlBanner
               openSessions={openSessions}
-              selectedAssistantId={selectedAssistantId}
+              selectedAssistantId={loggedInAsprakId}
               activeAssistant={activeAssistant}
               updatingSessionIds={updatingSessionIds}
               onCloseSingleSession={handleBannerCloseSingle}
@@ -610,7 +716,7 @@ export default function HomeScreen() {
 
             <View style={styles.listHeader}>
               <ThemedText type="subtitle" style={styles.listTitle}>
-                Jadwal Sesi Praktikum Hari Ini
+                Jadwal Sesi Praktikum Anda
               </ThemedText>
               <Pressable
                 onPress={() => handleOpenCreateSession()}
@@ -634,7 +740,7 @@ export default function HomeScreen() {
                   Tidak ada sesi praktikum
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                  {error ?? 'Belum ada data jadwal sesi yang cocok dengan filter, atau tambahkan sesi baru.'}
+                  {error ?? 'Belum ada sesi praktikum yang ditugaskan kepada Anda untuk filter ini.'}
                 </ThemedText>
               </ThemedView>
             ) : (
@@ -642,7 +748,7 @@ export default function HomeScreen() {
                 <SessionCard
                   key={session.id}
                   session={session}
-                  selectedAssistantId={selectedAssistantId}
+                  selectedAssistantId={loggedInAsprakId}
                   activeAssistant={activeAssistant}
                   isUpdating={updatingSessionIds.includes(session.id)}
                   onOpenDetail={handleOpenDetail}
@@ -737,7 +843,7 @@ export default function HomeScreen() {
       <SessionDetailModal
         session={currentModalSession}
         visible={Boolean(activeModalSession)}
-        selectedAssistantId={selectedAssistantId}
+        selectedAssistantId={loggedInAsprakId}
         activeAssistant={activeAssistant}
         statusLogs={currentModalLogs}
         isUpdating={
@@ -1206,5 +1312,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     color: LaboraColors.textMuted,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: LaboraColors.dangerSoft,
+    borderWidth: 1,
+    borderColor: LaboraColors.dangerBorder,
+    borderRadius: 14,
+    padding: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: LaboraColors.danger,
+    fontWeight: '600',
+  },
+  errorDismissBtn: {
+    padding: 4,
+  },
+  quickApprovalEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: LaboraColors.successSoft,
+    borderWidth: 1,
+    borderColor: LaboraColors.successBorder,
+    borderRadius: 14,
+    padding: 12,
+  },
+  quickApprovalEmptyText: {
+    flex: 1,
+    fontSize: 12,
+    color: LaboraColors.successDark,
+    fontWeight: '600',
   },
 });

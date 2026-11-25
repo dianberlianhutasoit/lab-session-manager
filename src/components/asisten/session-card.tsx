@@ -11,6 +11,10 @@ import { ThemedView } from '@/components/themed-view';
 import { SessionStatusBadge } from './session-status-badge';
 import { formatTimeWIB } from './active-sessions-banner';
 import type { SessionWithDetails } from '@/context/session-context';
+import {
+  getEffectiveSessionStatus,
+  isAsprakAssignedToSession,
+} from '@/features/asprak/asprak-dashboard-helpers';
 import type { User } from '@/types';
 import { Spacing } from '@/constants/theme';
 
@@ -81,8 +85,12 @@ export function SessionCard({
   onEditSession,
   onDeleteSession,
 }: SessionCardProps) {
-  const { schedule, assistant, status, attendanceCount, openedAt, closedAt } = session;
-  const isOpen = status === 'OPEN';
+  const { schedule, assistant, attendanceCount, openedAt, closedAt, configSnapshot } = session;
+  const effectiveStatus = getEffectiveSessionStatus(session);
+  const isOpen = effectiveStatus === 'OPEN';
+  const isAuthorized = !selectedAssistantId || selectedAssistantId === 'ALL'
+    ? true
+    : isAsprakAssignedToSession(session, selectedAssistantId);
 
   const handleToggleWithConfirmation = () => {
     confirmSessionStatusChange({
@@ -145,7 +153,7 @@ export function SessionCard({
             </View>
           ) : null}
         </View>
-        <SessionStatusBadge status={status} size="small" isUpdating={isUpdating} />
+        <SessionStatusBadge status={effectiveStatus} size="small" isUpdating={isUpdating} />
       </View>
 
       {/* Main Info: Title & Topic */}
@@ -177,6 +185,17 @@ export function SessionCard({
           </ThemedText>
           <ThemedText type="small">
             {schedule?.date} ({schedule?.startTime} - {schedule?.endTime})
+          </ThemedText>
+        </View>
+
+        <View style={styles.metaRow}>
+          <ThemedText type="small" themeColor="textSecondary">
+            ⏱️ Aturan Denda:
+          </ThemedText>
+          <ThemedText type="small">
+            {configSnapshot
+              ? `Toleransi ${configSnapshot.gracePeriodMinutes} mnt • Rp${configSnapshot.lateFineAmount.toLocaleString('id-ID')}`
+              : 'Mengikuti konfigurasi Lab saat dibuka'}
           </ThemedText>
         </View>
 
@@ -251,12 +270,12 @@ export function SessionCard({
         ) : null}
 
         <Pressable
-          disabled={isUpdating}
+          disabled={isUpdating || !isAuthorized}
           onPress={handleToggleWithConfirmation}
           style={({ pressed }) => [
             styles.toggleButton,
             isOpen ? styles.toggleButtonClose : styles.toggleButtonOpen,
-            isUpdating && styles.disabledButton,
+            (isUpdating || !isAuthorized) && styles.disabledButton,
             pressed && styles.pressed,
           ]}>
           <ThemedText type="smallBold" style={styles.toggleButtonText}>

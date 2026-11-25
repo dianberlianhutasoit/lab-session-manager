@@ -5,7 +5,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import type { User } from '@/types';
 
-export type StatusFilter = 'ALL' | 'OPEN' | 'CLOSED';
+export type StatusFilter = 'ALL' | 'SCHEDULED' | 'OPEN' | 'CLOSED';
 
 interface SessionFilterHeaderProps {
   assistants: User[];
@@ -13,8 +13,10 @@ interface SessionFilterHeaderProps {
   onSelectAssistant: (id: string) => void;
   statusFilter: StatusFilter;
   onSelectStatusFilter: (status: StatusFilter) => void;
+  showAssistantFilter?: boolean;
   counts: {
     total: number;
+    scheduled?: number;
     open: number;
     closed: number;
   };
@@ -26,6 +28,7 @@ export function SessionFilterHeader({
   onSelectAssistant,
   statusFilter,
   onSelectStatusFilter,
+  showAssistantFilter = true,
   counts,
 }: SessionFilterHeaderProps) {
   return (
@@ -34,14 +37,23 @@ export function SessionFilterHeader({
       <View style={styles.statsRow}>
         <ThemedView type="backgroundElement" style={styles.statBox}>
           <ThemedText type="small" themeColor="textSecondary">
-            Total Sesi
+            Total
           </ThemedText>
           <ThemedText type="subtitle">{counts.total}</ThemedText>
         </ThemedView>
 
+        <ThemedView type="backgroundElement" style={[styles.statBox, styles.statBoxScheduled]}>
+          <ThemedText type="small" style={styles.statLabelScheduled}>
+            Terjadwal
+          </ThemedText>
+          <ThemedText type="subtitle" style={styles.statValueScheduled}>
+            {counts.scheduled ?? 0}
+          </ThemedText>
+        </ThemedView>
+
         <ThemedView type="backgroundElement" style={[styles.statBox, styles.statBoxOpen]}>
           <ThemedText type="small" style={styles.statLabelOpen}>
-            Sesi Terbuka
+            Dibuka
           </ThemedText>
           <ThemedText type="subtitle" style={styles.statValueOpen}>
             {counts.open}
@@ -50,7 +62,7 @@ export function SessionFilterHeader({
 
         <ThemedView type="backgroundElement" style={[styles.statBox, styles.statBoxClosed]}>
           <ThemedText type="small" style={styles.statLabelClosed}>
-            Sesi Ditutup
+            Ditutup
           </ThemedText>
           <ThemedText type="subtitle" style={styles.statValueClosed}>
             {counts.closed}
@@ -58,51 +70,60 @@ export function SessionFilterHeader({
         </ThemedView>
       </View>
 
-      {/* Assistant Filter Pills */}
-      <View style={styles.filterSection}>
-        <ThemedText type="smallBold" themeColor="textSecondary">
-          Pilih Akun Asisten:
-        </ThemedText>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillScroll}>
-          <Pressable
-            onPress={() => onSelectAssistant('ALL')}
-            style={[
-              styles.pill,
-              selectedAssistantId === 'ALL' && styles.pillActive,
-            ]}>
-            <ThemedText
-              type="small"
+      {/* Assistant Filter Pills (opsional saat tidak terkunci ke 1 Asprak) */}
+      {showAssistantFilter ? (
+        <View style={styles.filterSection}>
+          <ThemedText type="smallBold" themeColor="textSecondary">
+            Pilih Akun Asisten:
+          </ThemedText>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillScroll}>
+            <Pressable
+              onPress={() => onSelectAssistant('ALL')}
               style={[
-                styles.pillText,
-                selectedAssistantId === 'ALL' && styles.pillTextActive,
+                styles.pill,
+                selectedAssistantId === 'ALL' && styles.pillActive,
               ]}>
-              Semua Asisten
-            </ThemedText>
-          </Pressable>
+              <ThemedText
+                type="small"
+                style={[
+                  styles.pillText,
+                  selectedAssistantId === 'ALL' && styles.pillTextActive,
+                ]}>
+                Semua Asisten
+              </ThemedText>
+            </Pressable>
 
-          {assistants.map((ast) => {
-            const isSelected = selectedAssistantId === ast.id;
-            return (
-              <Pressable
-                key={ast.id}
-                onPress={() => onSelectAssistant(ast.id)}
-                style={[styles.pill, isSelected && styles.pillActive]}>
-                <ThemedText
-                  type="small"
-                  style={[styles.pillText, isSelected && styles.pillTextActive]}>
-                  👤 {ast.name}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
+            {assistants.map((ast) => {
+              const isSelected = selectedAssistantId === ast.id;
+              return (
+                <Pressable
+                  key={ast.id}
+                  onPress={() => onSelectAssistant(ast.id)}
+                  style={[styles.pill, isSelected && styles.pillActive]}>
+                  <ThemedText
+                    type="small"
+                    style={[styles.pillText, isSelected && styles.pillTextActive]}>
+                    👤 {ast.name}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {/* Status Filter Tabs */}
       <View style={styles.statusTabRow}>
-        {(['ALL', 'OPEN', 'CLOSED'] as StatusFilter[]).map((st) => {
+        {(['ALL', 'SCHEDULED', 'OPEN', 'CLOSED'] as StatusFilter[]).map((st) => {
           const isSelected = statusFilter === st;
-          const label = st === 'ALL' ? 'Semua Status' : st === 'OPEN' ? '🟢 Sesi Dibuka' : '🔴 Sesi Ditutup';
+          const label =
+            st === 'ALL'
+              ? 'Semua'
+              : st === 'SCHEDULED'
+                ? 'Terjadwal'
+                : st === 'OPEN'
+                  ? 'Dibuka'
+                  : 'Ditutup';
           return (
             <Pressable
               key={st}
@@ -143,6 +164,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#BBF7D0',
+  },
+  statBoxScheduled: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  statLabelScheduled: {
+    color: '#B45309',
+  },
+  statValueScheduled: {
+    color: '#D97706',
   },
   statLabelOpen: {
     color: '#15803D',

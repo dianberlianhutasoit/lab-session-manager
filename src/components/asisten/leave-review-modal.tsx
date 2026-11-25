@@ -1,24 +1,30 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Modal,
-  View,
-  StyleSheet,
   Pressable,
   ScrollView,
+  StyleSheet,
   TextInput,
-  Alert,
+  View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
-import { getLeaveCategoryLabel } from './leave-request-card';
+import { LaboraColors, Spacing } from '@/constants/theme';
+import { evaluateLeaveActionState } from '@/features/asprak/asprak-dashboard-helpers';
+import type { FineDoc, LeaveRequest, LeaveStatus } from '@/types';
 import { formatAttendanceTime } from './attendance-record-card';
-import type { LeaveRequest, LeaveStatus } from '@/types';
-import { Spacing, LaboraColors } from '@/constants/theme';
+import { getLeaveCategoryLabel } from './leave-request-card';
 
 interface LeaveReviewModalProps {
   visible: boolean;
   request: LeaveRequest | null;
   sessionTitle?: string;
+  courseCode?: string;
+  studentNim?: string;
+  relatedFine?: FineDoc | null;
+  isAuthorized?: boolean;
+  isOnline?: boolean;
   isSubmitting?: boolean;
   onClose: () => void;
   onSubmitDecision: (
@@ -47,21 +53,36 @@ export function LeaveReviewModal(props: LeaveReviewModalProps) {
 function LeaveReviewContent({
   request,
   sessionTitle,
+  courseCode,
+  studentNim,
+  relatedFine = null,
+  isAuthorized = true,
+  isOnline = true,
   isSubmitting = false,
   onClose,
   onSubmitDecision,
 }: LeaveReviewModalProps & { request: LeaveRequest }) {
   const [reviewerNote, setReviewerNote] = useState(request.reviewerNote ?? '');
 
+  const actionState = evaluateLeaveActionState({
+    request,
+    relatedFine,
+    isAuthorized,
+    isOnline,
+    isSubmitting,
+  });
+
   const handleDecision = async (decision: Exclude<LeaveStatus, 'PENDING'>) => {
+    if (!actionState.canAct) return;
     await onSubmitDecision(request.id, decision, reviewerNote);
     onClose();
   };
 
   const handlePreviewDocument = () => {
+    if (!request.attachmentName) return;
     Alert.alert(
-      'Pratinjau Dokumen',
-      `Membuka berkas: ${request.attachmentName ?? 'Surat_Keterangan_Sakit.pdf'}\nStatus: Dokumen Valid Terverifikasi.`,
+      'Lampiran Pengajuan Izin',
+      `Berkas terlampir: ${request.attachmentName}`,
       [{ text: 'Tutup' }]
     );
   };
@@ -71,7 +92,14 @@ function LeaveReviewContent({
     .map((n) => n[0])
     .join('')
     .substring(0, 2)
-    .toUpperCase() || 'MR';
+    .toUpperCase() || 'PR';
+
+  const statusBadgeStyle =
+    request.status === 'APPROVED'
+      ? { bg: '#DCFCE7', dot: '#16A34A', text: '#15803D', label: 'APPROVED' }
+      : request.status === 'REJECTED'
+        ? { bg: '#FEE2E2', dot: '#DC2626', text: '#B91C1C', label: 'REJECTED' }
+        : { bg: '#FEF3C7', dot: '#D97706', text: '#B45309', label: 'PENDING' };
 
   return (
     <View style={styles.modalContent}>
@@ -90,18 +118,34 @@ function LeaveReviewContent({
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-        {/* Banner: Kebijakan Verifikasi Otomatis (Screen 3 Stitch) */}
+        {/* Kebijakan Verifikasi & Dampak Denda */}
         <View style={styles.policyBanner}>
           <View style={styles.policyIconCircle}>
-            <Feather name="star" size={16} color={LaboraColors.primary} />
+            <Feather name="shield" size={16} color={LaboraColors.primary} />
           </View>
           <View style={styles.policyTextCol}>
-            <ThemedText style={styles.policyHeading}>Kebijakan Verifikasi Otomatis</ThemedText>
+            <ThemedText style={styles.policyHeading}>Keputusan Izin & Dampak Kehadiran</ThemedText>
             <ThemedText style={styles.policyText}>
-              Tinjau bukti dan surat keterangan dokter. AI Suggestion hanya sebagai rekomendasi klasifikasi teks, keputusan mutlak ada pada Asprak.
+              Menyetujui izin (APPROVED) mencatat kehadiran sebagai EXCUSED dan membebaskan denda unpaid menjadi waived.
             </ThemedText>
           </View>
         </View>
+
+        {/* Action Guard Warning (jika sudah diproses / offline / tidak berwenang) */}
+        {!actionState.canAct && actionState.blockReason ? (
+          <View
+            style={{
+              backgroundColor: '#FEF2F2',
+              borderWidth: 1,
+              borderColor: '#FECACA',
+              borderRadius: 12,
+              padding: 12,
+            }}>
+            <ThemedText style={{ fontSize: 12, fontWeight: '700', color: '#B91C1C' }}>
+              {actionState.blockReason}
+            </ThemedText>
+          </View>
+        ) : null}
 
         {/* Student Leave Request Card */}
         <View style={styles.studentCard}>
@@ -112,11 +156,15 @@ function LeaveReviewContent({
             </View>
             <View style={styles.studentInfoCol}>
               <ThemedText style={styles.studentName}>{request.userName}</ThemedText>
-              <ThemedText style={styles.studentNim}>NIM: 2210511019</ThemedText>
+              <ThemedText style={styles.studentNim}>
+                {studentNim ? `NIM: ${studentNim}` : request.userEmail}
+              </ThemedText>
             </View>
-            <View style={styles.pendingPill}>
-              <View style={styles.pendingDot} />
-              <ThemedText style={styles.pendingPillText}>Menunggu Review</ThemedText>
+            <View style={[styles.pendingPill, { backgroundColor: statusBadgeStyle.bg }]}>
+              <View style={[styles.pendingDot, { backgroundColor: statusBadgeStyle.dot }]} />
+              <ThemedText style={[styles.pendingPillText, { color: statusBadgeStyle.text }]}>
+                {statusBadgeStyle.label}
+              </ThemedText>
             </View>
           </View>
 
@@ -125,13 +173,14 @@ function LeaveReviewContent({
             <View style={styles.metaRow}>
               <Feather name="book-open" size={13} color={LaboraColors.primary} />
               <ThemedText style={styles.metaText}>
-                TI-3A • {sessionTitle ?? 'Pemrograman Mobile Lanjut'}
+                {courseCode ? `${courseCode} • ` : ''}
+                {sessionTitle ?? `Sesi ${request.sessionId}`}
               </ThemedText>
             </View>
             <View style={styles.metaRow}>
               <Feather name="clock" size={13} color={LaboraColors.primary} />
               <ThemedText style={styles.metaText}>
-                {formatAttendanceTime(request.submittedAt)}
+                Diajukan: {formatAttendanceTime(request.submittedAt)}
               </ThemedText>
             </View>
           </View>
@@ -144,6 +193,34 @@ function LeaveReviewContent({
             </ThemedText>
           </View>
 
+          {/* Fine Impact Notice */}
+          {actionState.fineNoticeMessage ? (
+            <View
+              style={[
+                styles.aiSuggestionBox,
+                actionState.fineNoticeType === 'warning' && {
+                  backgroundColor: '#FFFBEB',
+                  borderColor: '#FDE68A',
+                },
+              ]}>
+              <View style={styles.aiIconCircle}>
+                <Feather
+                  name={actionState.fineNoticeType === 'warning' ? 'alert-triangle' : 'info'}
+                  size={15}
+                  color={actionState.fineNoticeType === 'warning' ? '#D97706' : LaboraColors.primary}
+                />
+              </View>
+              <View style={styles.aiTextCol}>
+                <ThemedText style={styles.aiTitle}>
+                  Status Denda Sesi Ini ({relatedFine?.status ?? '-'})
+                </ThemedText>
+                <ThemedText style={styles.aiSubtitle}>
+                  {actionState.fineNoticeMessage}
+                </ThemedText>
+              </View>
+            </View>
+          ) : null}
+
           {/* AI Suggestion Box */}
           <View style={styles.aiSuggestionBox}>
             <View style={styles.aiIconCircle}>
@@ -151,10 +228,10 @@ function LeaveReviewContent({
             </View>
             <View style={styles.aiTextCol}>
               <ThemedText style={styles.aiTitle}>
-                Kategori AI: {getLeaveCategoryLabel(request.category)} • Keyakinan 96%
+                Kategori: {getLeaveCategoryLabel(request.category)}
               </ThemedText>
               <ThemedText style={styles.aiSubtitle}>
-                ✓ Dokumen Valid Teridentifikasi
+                {request.aiAnalysis ?? (request.sentiment ? `Sentimen: ${request.sentiment}` : 'Klasifikasi teks lokal')}
               </ThemedText>
             </View>
           </View>
@@ -167,25 +244,28 @@ function LeaveReviewContent({
               </View>
               <View style={styles.attachmentMetaCol}>
                 <ThemedText style={styles.attachmentFileName} numberOfLines={1}>
-                  {request.attachmentName ?? 'Surat Sakit RS Hermina.pdf'}
+                  {request.attachmentName ?? 'Tidak ada berkas lampiran'}
                 </ThemedText>
                 <ThemedText style={styles.attachmentFileSize}>
-                  842 KB • Rekam Medis
+                  {request.attachmentName ? 'Lampiran pendukung izin' : 'Pengajuan tanpa lampiran'}
                 </ThemedText>
               </View>
             </View>
 
-            <Pressable style={styles.previewBtn} onPress={handlePreviewDocument}>
-              <ThemedText style={styles.previewBtnText}>Pratinjau</ThemedText>
-            </Pressable>
+            {request.attachmentName ? (
+              <Pressable style={styles.previewBtn} onPress={handlePreviewDocument}>
+                <ThemedText style={styles.previewBtnText}>Lihat</ThemedText>
+              </Pressable>
+            ) : null}
           </View>
 
           {/* Reviewer Note Input */}
           <View style={styles.noteField}>
             <ThemedText style={styles.noteLabel}>Catatan Reviewer (Opsional)</ThemedText>
             <TextInput
+              editable={actionState.canAct}
               style={styles.noteInput}
-              placeholder="Tambahkan catatan asisten jika diperlukan..."
+              placeholder="Tambahkan catatan Asprak jika diperlukan..."
               placeholderTextColor={LaboraColors.textMuted}
               value={reviewerNote}
               onChangeText={setReviewerNote}
@@ -197,19 +277,19 @@ function LeaveReviewContent({
       {/* Decision Footer Buttons */}
       <View style={styles.footer}>
         <Pressable
-          disabled={isSubmitting}
+          disabled={!actionState.canAct}
           onPress={() => handleDecision('REJECTED')}
-          style={[styles.rejectBtn, isSubmitting && styles.disabledBtn]}>
+          style={[styles.rejectBtn, !actionState.canAct && styles.disabledBtn]}>
           <Feather name="x" size={16} color="#DC2626" style={{ marginRight: 6 }} />
-          <ThemedText style={styles.rejectBtnText}>Tolak</ThemedText>
+          <ThemedText style={styles.rejectBtnText}>Tolak (REJECTED)</ThemedText>
         </Pressable>
 
         <Pressable
-          disabled={isSubmitting}
+          disabled={!actionState.canAct}
           onPress={() => handleDecision('APPROVED')}
-          style={[styles.approveBtn, isSubmitting && styles.disabledBtn]}>
+          style={[styles.approveBtn, !actionState.canAct && styles.disabledBtn]}>
           <Feather name="check" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-          <ThemedText style={styles.approveBtnText}>Setujui Izin</ThemedText>
+          <ThemedText style={styles.approveBtnText}>Setujui (APPROVED)</ThemedText>
         </Pressable>
       </View>
     </View>
