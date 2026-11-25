@@ -61,7 +61,7 @@ export default function MapsScreen() {
   const [editingLab, setEditingLab] = useState<Lab | null>(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
 
-  const assistants = useMemo(() => users.filter((u) => u.role === 'asisten'), [users]);
+  const assistants = useMemo(() => users.filter((u) => u.role === 'asprak'), [users]);
 
   // Initial map region (pusatkan ke lab pertama atau default koordinat kampus)
   const defaultRegion: Region = useMemo(() => {

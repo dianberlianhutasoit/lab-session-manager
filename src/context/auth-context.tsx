@@ -27,7 +27,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function isRole(value: unknown): value is Role {
-  return value === 'praktikan' || value === 'asisten';
+  return value === 'aslab' || value === 'asprak' || value === 'praktikan';
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

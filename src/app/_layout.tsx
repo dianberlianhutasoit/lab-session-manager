@@ -33,6 +33,7 @@ export default function RootLayout() {
             <NotificationPermissionBanner />
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(aslab)" />
               <Stack.Screen name="(main)" />
             </Stack>
           </SessionProvider>

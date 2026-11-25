@@ -1,6 +1,8 @@
-export type Role = "praktikan" | "asisten";
+export type Role = "aslab" | "asprak" | "praktikan";
 
 export type SessionStatus = "OPEN" | "CLOSED";
+
+export type SprintSessionStatus = "SCHEDULED" | "OPEN" | "CLOSED";
 
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
 
@@ -12,19 +14,50 @@ export type LeaveCategory =
 
 export interface User {
   id: string;
+  uid?: string;
   name: string;
   email: string;
   role: Role;
   nim?: string;
+  createdAt?: string;
   expoPushToken?: string | null;
 }
 
 /**
- * SRS-07 Sprint 3: Representasi Data Lokasi Laboratorium (collection: labs)
+ * Sprint 4 Contract — courses/{courseId} (Owned by Dev A)
+ */
+export interface CourseDoc {
+  id: string;
+  code: string;
+  name: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface LabLocation {
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface LabAttendanceConfig {
+  gracePeriodMinutes: number;
+  lateFineAmount: number;
+}
+
+/**
+ * Sprint 4 Contract — labs/{labId} (Owned by Dev A)
+ * Tetap menyertakan field kompatibilitas maps/sesi (building, latitude, longitude, radius).
  */
 export interface Lab {
   id: string;
+  courseId?: string;
   name: string;
+  aslabId?: string;
+  location?: LabLocation;
+  radiusMeters?: number;
+  attendanceConfig?: LabAttendanceConfig;
   code?: string;
   building: string;
   latitude: number;
@@ -37,16 +70,104 @@ export interface Lab {
   updatedAt?: string;
 }
 
-/**
- * Payload Form untuk Tambah / Edit Laboratorium
- */
-export interface LabFormInput {
+export interface LabDoc {
+  id: string;
+  courseId: string;
   name: string;
-  code?: string;
+  aslabId: string;
+  location: LabLocation;
+  radiusMeters: number;
+  attendanceConfig: LabAttendanceConfig;
+  // Mirror flat fields for backward compatibility with existing map/session screens
   building: string;
   latitude: number;
   longitude: number;
   radius: number;
+  code?: string;
+  capacity?: number;
+  description?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Sprint 4 Contract — labMembers/{labId_userId} (Owned by Dev A)
+ */
+export interface LabMemberDoc {
+  id: string; // format: `${labId}_${userId}`
+  labId: string;
+  userId: string;
+  role: "praktikan" | "asprak";
+  assignedAt: string;
+}
+
+/**
+ * Sprint 4 Contract — sessions/{sessionId} (Read by Dev A, Owned by Dev B)
+ */
+export interface SprintSessionDoc {
+  id: string;
+  labId: string;
+  courseId: string;
+  asprakId: string;
+  title: string;
+  sessionNumber: number;
+  startAt: string;
+  endAt: string;
+  status: SprintSessionStatus;
+  openedAt?: string;
+  closedAt?: string;
+  configSnapshot?: LabAttendanceConfig;
+  // Legacy compatibility fields
+  scheduleId?: string;
+  assistantId?: string;
+}
+
+/**
+ * Sprint 4 Contract — attendances/{sessionId_studentId} (Read by Dev A, Owned by Dev B)
+ */
+export interface SprintAttendanceDoc {
+  id: string;
+  sessionId: string;
+  labId: string;
+  studentId: string;
+  status: "PRESENT" | "EXCUSED" | "ABSENT";
+  checkedInAt: string;
+  isLate: boolean;
+  lateMinutes: number;
+}
+
+/**
+ * Sprint 4 Contract — fines/{sessionId_studentId} (Read by Dev A)
+ */
+export type FineStatus = "unpaid" | "pending" | "paid" | "waived";
+
+export interface FineDoc {
+  id: string;
+  studentId: string;
+  sessionId: string;
+  labId: string;
+  amount: number;
+  reason: string;
+  status: FineStatus;
+  createdAt: string;
+  paidAt?: string;
+}
+
+/**
+ * Payload Form untuk Tambah / Edit Laboratorium
+ */
+export interface LabFormInput {
+  courseId?: string;
+  name: string;
+  code?: string;
+  building: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  gracePeriodMinutes?: number;
+  lateFineAmount?: number;
   capacity?: number;
   description?: string;
 }

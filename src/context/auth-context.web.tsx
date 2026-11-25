@@ -18,7 +18,13 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const STORAGE_KEY = 'lab_session_web_auth_user';
 
 function isRole(value: unknown): value is Role {
-  return value === 'praktikan' || value === 'asisten';
+  return value === 'aslab' || value === 'asprak' || value === 'praktikan';
+}
+
+function inferRoleFromEmail(email: string): Role {
+  if (email.includes('aslab')) return 'aslab';
+  if (email.includes('asprak') || email.includes('asisten')) return 'asprak';
+  return 'praktikan';
 }
 
 function getInitialWebUser(): User | null {
@@ -59,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (name: string, email: string, _password: string) => {
     setError(null);
     const trimmedEmail = email.trim().toLowerCase();
-    const role: Role = trimmedEmail.includes('asisten') ? 'asisten' : 'praktikan';
+    const role: Role = inferRoleFromEmail(trimmedEmail);
     const newUser: User = {
       id: `web-user-${Date.now()}`,
       name: name.trim(),
@@ -83,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // 2. Jika tidak ada di dummy, buat user baru sesuai pola email
-    const role: Role = trimmedEmail.includes('asisten') ? 'asisten' : 'praktikan';
+    const role: Role = inferRoleFromEmail(trimmedEmail);
     const fallbackUser: User = {
       id: `web-user-${Date.now()}`,
       name: trimmedEmail.split('@')[0],

@@ -14,7 +14,7 @@ export default function AppTabs() {
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
-      {profile?.role === 'asisten' && <NativeTabs.Trigger name="index">
+      {profile?.role === 'asprak' && <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Sesi Lab</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/home.png')}
@@ -30,7 +30,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>}
 
-      {profile?.role === 'asisten' && <NativeTabs.Trigger name="explore">
+      {profile?.role === 'asprak' && <NativeTabs.Trigger name="explore">
         <NativeTabs.Trigger.Label>Rekap Presensi</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}

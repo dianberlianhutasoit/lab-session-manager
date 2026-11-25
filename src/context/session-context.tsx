@@ -196,7 +196,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!profile) return;
     Promise.resolve().then(() => {
-      if (profile.role === 'asisten') {
+      if (profile.role === 'asprak' || profile.role === 'aslab') {
         setCurrentAssistantId(profile.id);
       } else if (profile.role === 'praktikan') {
         setCurrentStudentId(profile.id);
@@ -1431,7 +1431,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       isFirestoreConnected,
-      currentAssistantId: profile?.role === 'asisten' ? profile.id : currentAssistantId,
+      currentAssistantId:
+        profile?.role === 'asprak' || profile?.role === 'aslab' ? profile.id : currentAssistantId,
       setCurrentAssistantId,
       createClass,
       updateClass,

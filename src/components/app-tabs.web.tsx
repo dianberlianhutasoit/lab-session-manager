@@ -22,9 +22,9 @@ export default function AppTabs() {
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          {profile?.role === 'asisten' && <TabTrigger name="home" href="/" asChild><TabButton>Sesi Lab</TabButton></TabTrigger>}
+          {profile?.role === 'asprak' && <TabTrigger name="home" href="/" asChild><TabButton>Sesi Lab</TabButton></TabTrigger>}
           {profile?.role === 'praktikan' && <TabTrigger name="praktikan" href="/praktikan" asChild><TabButton>Jadwal Praktikum</TabButton></TabTrigger>}
-          {profile?.role === 'asisten' && <TabTrigger name="explore" href="/explore" asChild><TabButton>Rekap Presensi</TabButton></TabTrigger>}
+          {profile?.role === 'asprak' && <TabTrigger name="explore" href="/explore" asChild><TabButton>Rekap Presensi</TabButton></TabTrigger>}
         </CustomTabList>
       </TabList>
     </Tabs>

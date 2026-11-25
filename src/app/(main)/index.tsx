@@ -99,7 +99,7 @@ export default function HomeScreen() {
   const [editingLab, setEditingLab] = useState<Lab | null>(null);
 
   const assistants = useMemo(
-    () => users.filter((u) => u.role === 'asisten'),
+    () => users.filter((u) => u.role === 'asprak'),
     [users]
   );
 

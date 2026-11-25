@@ -39,13 +39,19 @@ export const users: User[] = [
     id: "user-asisten-001",
     name: "Dimas Saputra",
     email: "dimas.saputra@example.test",
-    role: "asisten",
+    role: "asprak",
   },
   {
     id: "user-asisten-002",
     name: "Ayu Lestari",
     email: "ayu.lestari@example.test",
-    role: "asisten",
+    role: "asprak",
+  },
+  {
+    id: "user-aslab-1",
+    name: "Dr. Hendra Wijaya",
+    email: "aslab@test.com",
+    role: "aslab",
   },
 ];
 

@@ -7,7 +7,7 @@ export interface StudentCardProps {
   name: string;
   nim?: string;
   email?: string;
-  role?: 'asisten' | 'praktikan' | 'admin';
+  role?: 'aslab' | 'asprak' | 'praktikan' | 'admin';
   subInfo?: string;
   onPress?: () => void;
   rightAction?: React.ReactNode;
@@ -23,7 +23,7 @@ export function StudentCard({
   rightAction,
 }: StudentCardProps) {
   const initial = name.trim().charAt(0).toUpperCase() || 'U';
-  const isAdmin = role === 'asisten' || role === 'admin';
+  const isAdmin = role === 'aslab' || role === 'asprak' || role === 'admin';
 
   const avatarBg = isAdmin ? MemphisColors.roleAdminBg : MemphisColors.roleStudentBg;
   const avatarTextColor = isAdmin ? MemphisColors.roleAdminText : MemphisColors.roleStudentText;

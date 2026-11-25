@@ -37,7 +37,7 @@ export default function MainLayout() {
     );
   }
 
-  if (profile.role !== 'praktikan' && profile.role !== 'asisten') {
+  if (profile.role !== 'praktikan' && profile.role !== 'asprak' && profile.role !== 'aslab') {
     return (
       <View style={styles.state}>
         <Text style={styles.title}>Akses belum tersedia</Text>
@@ -46,6 +46,10 @@ export default function MainLayout() {
         </TouchableOpacity>
       </View>
     );
+  }
+
+  if (profile.role === 'aslab' && pathname !== '/maps') {
+    return <Redirect href={'/(aslab)' as Href} />;
   }
 
   if (
@@ -58,7 +62,7 @@ export default function MainLayout() {
   }
 
   if (
-    profile.role === 'asisten' &&
+    profile.role === 'asprak' &&
     (pathname === '/praktikan' || pathname.startsWith('/praktikan/'))
   ) {
     return <Redirect href={'/' as Href} />;

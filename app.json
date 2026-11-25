@@ -33,6 +33,7 @@
       "expo-image",
       "expo-status-bar",
       "expo-web-browser",
+      "expo-sharing",
       "@react-native-firebase/app",
       [
         "expo-splash-screen",
@@ -65,10 +66,13 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "2.4.0"
+            "kotlinVersion": "2.4.0",
+            "enableMinifyInReleaseBuilds": false,
+            "extraProguardRules": "-keep class * extends androidx.room.RoomDatabase { *; }\n-keep class androidx.work.** { *; }"
           }
         }
-      ]
+      ],
+      "./plugins/with-short-cxx-path"
     ],
     "experiments": {
       "typedRoutes": true,

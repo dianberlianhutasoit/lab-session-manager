@@ -1,152 +1,795 @@
 rules_version = '2';
 
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following Cloud Firestore
+// data structures (Sprint 4 Contract + Legacy Compatibility):
+//
+// 1. Collection: users
+//    Document ID: {userId} (Firebase Auth UID or seeded user ID)
+//    Fields:
+//      - id: string (optional, == userId, <= 128 chars)
+//      - uid: string (optional, immutable for non-aslab, == userId, <= 128 chars)
+//      - name: string (required, 1..120 chars)
+//      - email: string (required, valid email, <= 254 chars)
+//      - role: string (required, immutable for non-aslab, 'aslab' | 'asprak' | 'praktikan')
+//      - nim: string | null (optional, <= 50 chars)
+//      - createdAt: string | timestamp (optional, immutable for non-aslab)
+//      - updatedAt: string | timestamp (optional)
+//      - expoPushToken: string | null (optional, <= 512 chars)
+//
+// 2. Collection: courses (Dev A / Aslab Owned)
+//    Document ID: {courseId}
+//    Fields:
+//      - id: string (optional, == courseId, <= 128 chars)
+//      - code: string (required, 1..32 chars)
+//      - name: string (required, 1..150 chars)
+//      - createdAt: string | timestamp (optional)
+//      - updatedAt: string | timestamp (optional)
+//
+// 3. Collection: labs (Dev A / Aslab Owned)
+//    Document ID: {labId}
+//    Fields:
+//      - id: string (optional, == labId, <= 128 chars)
+//      - courseId: string (optional, <= 128 chars)
+//      - name: string (required, 1..150 chars)
+//      - aslabId: string (optional, <= 128 chars)
+//      - location: map (optional: { name, address, latitude, longitude })
+//      - radiusMeters: number (optional if radius present, > 0 && <= 100000)
+//      - radius: number (optional if radiusMeters present, > 0 && <= 100000)
+//      - attendanceConfig: map (optional: { gracePeriodMinutes >= 0, lateFineAmount >= 0 })
+//      - code: string (optional, <= 32 chars)
+//      - building: string (optional, <= 200 chars)
+//      - latitude: number (optional, -90..90)
+//      - longitude: number (optional, -180..180)
+//      - capacity: number (optional, 0..10000)
+//      - description: string (optional, <= 1000 chars)
+//      - isActive: bool (optional)
+//      - createdAt: string | timestamp (optional)
+//      - updatedAt: string | timestamp (optional)
+//
+// 4. Collection: labMembers (Dev A / Aslab Owned)
+//    Document ID: {memberId} == `${labId}_${userId}`
+//    Fields:
+//      - id: string (optional, == memberId)
+//      - labId: string (required, 1..128 chars)
+//      - userId: string (required, 1..128 chars)
+//      - role: string (required, 'praktikan' | 'asprak')
+//      - assignedAt: string | timestamp (optional)
+//
+// 5. Collection: classes (Legacy / Staff Owned)
+//    Document ID: {classId}
+//    Fields:
+//      - id, courseCode, title, className, room, assistantId,
+//        semester?, capacity?, createdAt?, updatedAt?
+//
+// 6. Collection: schedules (Legacy / Staff Owned)
+//    Document ID: {scheduleId}
+//    Fields:
+//      - id, classId?, className?, sessionNumber?, topic?, title,
+//        courseCode, date, startTime, endTime, room, createdAt?, updatedAt?
+//
+// 7. Collection: sessions (Sprint 4 Dev B & Legacy / Staff Owned)
+//    Document ID: {sessionId}
+//    Fields:
+//      - id, labId?, courseId?, asprakId?, title?, sessionNumber?,
+//        startAt?, endAt?, status ('SCHEDULED' | 'OPEN' | 'CLOSED'),
+//        openedAt?, closedAt?, configSnapshot?, classId?, scheduleId?,
+//        assistantId?, lastUpdatedBy?, createdAt?, updatedAt?
+//
+// 8. Collections: status_logs & session_status_logs (Staff Owned)
+//    Document ID: {logId}
+//    Fields:
+//      - id?, sessionId, previousStatus, newStatus, changedBy,
+//        changedByName?, isSubstitute?, changedAt
+//
+// 9. Collections: attendances & attendance (Sprint 4 & Legacy)
+//    Document ID: {attendanceId}
+//    Fields:
+//      - id?, sessionId, labId?, studentId? / userId?, status?,
+//        checkedInAt?, recordedAt?, isLate?, lateMinutes?,
+//        latitude?, longitude?, accuracy?, distanceMeters?,
+//        method?, qrCodeToken?, createdAt?, updatedAt?
+//
+// 10. Collection: fines (Sprint 4 Dev B create/waive, Dev C Admin SDK webhook)
+//     Document ID: {fineId} == `${sessionId}_${studentId}`
+//     Fields:
+//       - id?, studentId, sessionId, labId, amount (>= 0), reason,
+//         status ('unpaid' | 'pending' | 'paid' | 'waived'),
+//         createdAt, paidAt?, waivedAt?, waivedBy?, updatedAt?
+//
+// 11. Collection: payments (Server-side Admin SDK writes only)
+//     Document ID: {paymentId}
+//     Fields:
+//       - id, fineId, studentId, orderId, amount, status,
+//         snapToken, redirectUrl, createdAt, settledAt?
+//
+// 12. Collection: notifications (Staff/Admin create/delete, owner toggles isRead)
+//     Document ID: {notificationId}
+//     Fields:
+//       - id?, userId, title, body,
+//         type ('fine_created' | 'payment_success' | 'payment_failed'),
+//         data? (map <= 20 keys), isRead (bool), createdAt
+//
+// 13. Collections: leave_requests & permissions
+//     Document ID: {requestId} / {permissionId}
+//     Fields:
+//       - Student creates with own userId & status == 'PENDING';
+//         Staff reviews (APPROVED / REJECTED) or deletes.
+//
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ==========================================
-    // HELPER FUNCTIONS (Fungsi Keamanan)
-    // ==========================================
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
 
-    // Memeriksa apakah pengguna sudah login via Firebase Auth
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Memeriksa apakah UID pengguna sesuai dengan dokumen pemilik
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Mengambil data pengguna dari koleksi users
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        !('uid' in resource.data) ||
+        request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() >= 3 &&
+        email.size() <= 254 &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidLatitude(val) {
+      return val is number && val >= -90 && val <= 90;
+    }
+
+    function isValidLongitude(val) {
+      return val is number && val >= -180 && val <= 180;
+    }
+
+    function isValidTimestampOrIso(val) {
+      return val is timestamp ||
+        (val is string && val.size() >= 1 && val.size() <= 64);
+    }
+
+    function isValidOptionalTimestampOrIso(data, field) {
+      return !(field in data) || isValidTimestampOrIso(data[field]);
+    }
+
+    function isValidOptionalString(data, field, minLen, maxLen) {
+      return !(field in data) ||
+        (data[field] is string &&
+          data[field].size() >= minLen &&
+          data[field].size() <= maxLen);
+    }
+
+    function isValidNullableString(data, field, maxLen) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Strict Role Helpers (Sprint 4 RBAC)
+    // ===============================================================
+
+    function hasUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Memeriksa apakah pengguna memiliki role 'asisten'
-    function isAssistant() {
+    function hasTokenRole(role) {
+      return 'role' in request.auth.token && request.auth.token.role == role;
+    }
+
+    function hasProfileRole(role) {
+      return hasUserDoc() &&
+        'role' in getUserData() &&
+        getUserData().role == role;
+    }
+
+    function isAslab() {
       return isAuthenticated() && (
-        request.auth.token.role == 'asisten' ||
-        getUserData().role == 'asisten'
+        hasTokenRole('aslab') || hasProfileRole('aslab')
       );
     }
 
-    // Memeriksa apakah pengguna memiliki role 'praktikan'
+    function isAsprak() {
+      return isAuthenticated() && (
+        hasTokenRole('asprak') || hasProfileRole('asprak')
+      );
+    }
+
     function isPractitioner() {
       return isAuthenticated() && (
-        request.auth.token.role == 'praktikan' ||
-        getUserData().role == 'praktikan'
+        hasTokenRole('praktikan') || hasProfileRole('praktikan')
       );
     }
 
-    // ==========================================
-    // 1. KOLEKSI USERS (SRS-02)
-    // ==========================================
-    match /users/{userId} {
-      // Semua pengguna login bisa membaca profil dasar sesama pengguna/asisten
-      allow read: if isAuthenticated();
-      // Pengguna hanya bisa mendaftarkan profil miliknya sendiri saat awal registrasi
-      allow create: if isAuthenticated() && isOwner(userId);
-      // Pemilik profil dapat memperbarui profil miliknya, TETAPI field 'role' bersifat immutable
-      // (mencegah privilege escalation dari praktikan menjadi asisten)
-      allow update: if isAuthenticated() && isOwner(userId) &&
-        request.resource.data.role == resource.data.role;
-      allow delete: if false; // Profil tidak boleh sembarangan dihapus
+    function isStaff() {
+      return isAuthenticated() && (
+        ('role' in request.auth.token && request.auth.token.role in ['aslab', 'asprak']) ||
+        (hasUserDoc() && 'role' in getUserData() && getUserData().role in ['aslab', 'asprak'])
+      );
     }
 
-    // ==========================================
-    // 2. KOLEKSI CLASSES & SCHEDULES (SRS-07)
-    // ==========================================
-    match /classes/{classId} {
-      // Praktikan dan asisten dapat melihat daftar kelas
+    // ===============================================================
+    // Shared Nested Object Validators
+    // ===============================================================
+
+    function isValidAttendanceConfig(cfg) {
+      return cfg is map &&
+        cfg.keys().hasAll(['gracePeriodMinutes', 'lateFineAmount']) &&
+        cfg.keys().hasOnly(['gracePeriodMinutes', 'lateFineAmount']) &&
+        cfg.gracePeriodMinutes is number &&
+        cfg.gracePeriodMinutes >= 0 &&
+        cfg.gracePeriodMinutes <= 1440 &&
+        cfg.lateFineAmount is number &&
+        cfg.lateFineAmount >= 0 &&
+        cfg.lateFineAmount <= 100000000;
+    }
+
+    function isValidLabLocation(loc) {
+      return loc is map &&
+        loc.keys().hasOnly(['name', 'address', 'latitude', 'longitude']) &&
+        isValidOptionalString(loc, 'name', 0, 200) &&
+        isValidOptionalString(loc, 'address', 0, 400) &&
+        (!('latitude' in loc) || isValidLatitude(loc.latitude)) &&
+        (!('longitude' in loc) || isValidLongitude(loc.longitude));
+    }
+
+    function isAttendanceOwner(data) {
+      return ('studentId' in data && data.studentId == request.auth.uid) ||
+        ('userId' in data && data.userId == request.auth.uid);
+    }
+
+    function isSelfAttendanceCreate(data) {
+      return isAttendanceOwner(data) &&
+        (!('studentId' in data) || data.studentId == request.auth.uid) &&
+        (!('userId' in data) || data.userId == request.auth.uid);
+    }
+
+    // ===============================================================
+    // Domain Validators (Used in BOTH create and update)
+    // ===============================================================
+
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['name', 'email', 'role']) &&
+        data.keys().hasOnly([
+          'id', 'uid', 'name', 'email', 'role',
+          'nim', 'createdAt', 'updatedAt', 'expoPushToken'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == userId && data.id.size() <= 128)) &&
+        (!('uid' in data) || (data.uid is string && data.uid == userId && data.uid.size() <= 128)) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        isValidEmail(data.email) &&
+        data.role in ['aslab', 'asprak', 'praktikan'] &&
+        isValidNullableString(data, 'nim', 50) &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt') &&
+        isValidNullableString(data, 'expoPushToken', 512);
+    }
+
+    function isValidCourse(data, courseId) {
+      return data.keys().hasAll(['code', 'name']) &&
+        data.keys().hasOnly(['id', 'code', 'name', 'createdAt', 'updatedAt']) &&
+        (!('id' in data) || (data.id is string && data.id == courseId && data.id.size() <= 128)) &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 32 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 150 &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidLab(data, labId) {
+      return data.keys().hasAll(['name']) &&
+        data.keys().hasOnly([
+          'id', 'courseId', 'name', 'aslabId', 'location',
+          'radiusMeters', 'attendanceConfig', 'code', 'building',
+          'latitude', 'longitude', 'radius', 'capacity',
+          'description', 'isActive', 'createdAt', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == labId && data.id.size() <= 128)) &&
+        isValidOptionalString(data, 'courseId', 0, 128) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 150 &&
+        isValidOptionalString(data, 'aslabId', 0, 128) &&
+        (!('location' in data) || isValidLabLocation(data.location)) &&
+        (
+          ('radiusMeters' in data && data.radiusMeters is number && data.radiusMeters > 0 && data.radiusMeters <= 100000) ||
+          ('radius' in data && data.radius is number && data.radius > 0 && data.radius <= 100000)
+        ) &&
+        (!('radiusMeters' in data) || (data.radiusMeters is number && data.radiusMeters > 0 && data.radiusMeters <= 100000)) &&
+        (!('radius' in data) || (data.radius is number && data.radius > 0 && data.radius <= 100000)) &&
+        (!('attendanceConfig' in data) || isValidAttendanceConfig(data.attendanceConfig)) &&
+        isValidOptionalString(data, 'code', 0, 32) &&
+        isValidOptionalString(data, 'building', 0, 200) &&
+        (!('latitude' in data) || isValidLatitude(data.latitude)) &&
+        (!('longitude' in data) || isValidLongitude(data.longitude)) &&
+        (!('capacity' in data) || (data.capacity is number && data.capacity >= 0 && data.capacity <= 10000)) &&
+        isValidOptionalString(data, 'description', 0, 1000) &&
+        (!('isActive' in data) || data.isActive is bool) &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidLabMember(data, memberId) {
+      return data.keys().hasAll(['labId', 'userId', 'role']) &&
+        data.keys().hasOnly(['id', 'labId', 'userId', 'role', 'assignedAt']) &&
+        data.labId is string && data.labId.size() >= 1 && data.labId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        memberId == data.labId + '_' + data.userId &&
+        (!('id' in data) || (data.id is string && data.id == memberId)) &&
+        data.role in ['praktikan', 'asprak'] &&
+        isValidOptionalTimestampOrIso(data, 'assignedAt');
+    }
+
+    function isValidClass(data, classId) {
+      return data.keys().hasAll(['courseCode', 'title', 'className', 'room', 'assistantId']) &&
+        data.keys().hasOnly([
+          'id', 'courseCode', 'title', 'className', 'room',
+          'assistantId', 'semester', 'capacity', 'createdAt', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == classId && data.id.size() <= 128)) &&
+        data.courseCode is string && data.courseCode.size() >= 1 && data.courseCode.size() <= 32 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 100 &&
+        data.room is string && data.room.size() >= 1 && data.room.size() <= 150 &&
+        data.assistantId is string && data.assistantId.size() >= 1 && data.assistantId.size() <= 128 &&
+        isValidOptionalString(data, 'semester', 0, 64) &&
+        (!('capacity' in data) || (data.capacity is number && data.capacity >= 0 && data.capacity <= 10000)) &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidSchedule(data, scheduleId) {
+      return data.keys().hasAll(['title', 'courseCode', 'date', 'startTime', 'endTime', 'room']) &&
+        data.keys().hasOnly([
+          'id', 'classId', 'className', 'sessionNumber', 'topic',
+          'title', 'courseCode', 'date', 'startTime', 'endTime',
+          'room', 'createdAt', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == scheduleId && data.id.size() <= 128)) &&
+        isValidOptionalString(data, 'classId', 0, 128) &&
+        isValidOptionalString(data, 'className', 0, 100) &&
+        (!('sessionNumber' in data) || (data.sessionNumber is number && data.sessionNumber >= 0 && data.sessionNumber <= 1000)) &&
+        isValidOptionalString(data, 'topic', 0, 300) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.courseCode is string && data.courseCode.size() >= 1 && data.courseCode.size() <= 32 &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 64 &&
+        data.startTime is string && data.startTime.size() >= 1 && data.startTime.size() <= 32 &&
+        data.endTime is string && data.endTime.size() >= 1 && data.endTime.size() <= 32 &&
+        data.room is string && data.room.size() >= 1 && data.room.size() <= 150 &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidStatusLog(data, logId) {
+      return data.keys().hasAll(['sessionId', 'previousStatus', 'newStatus', 'changedBy', 'changedAt']) &&
+        data.keys().hasOnly([
+          'id', 'sessionId', 'previousStatus', 'newStatus',
+          'changedBy', 'changedByName', 'isSubstitute', 'changedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == logId && data.id.size() <= 128)) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.previousStatus in ['SCHEDULED', 'OPEN', 'CLOSED'] &&
+        data.newStatus in ['SCHEDULED', 'OPEN', 'CLOSED'] &&
+        data.changedBy is string && data.changedBy.size() >= 1 && data.changedBy.size() <= 128 &&
+        isValidOptionalString(data, 'changedByName', 0, 120) &&
+        (!('isSubstitute' in data) || data.isSubstitute is bool) &&
+        isValidTimestampOrIso(data.changedAt);
+    }
+
+    function isValidSession(data, sessionId) {
+      return data.keys().hasAll(['status']) &&
+        data.keys().hasOnly([
+          'id', 'labId', 'courseId', 'asprakId', 'title', 'sessionNumber',
+          'startAt', 'endAt', 'status', 'openedAt', 'closedAt', 'configSnapshot',
+          'classId', 'scheduleId', 'assistantId', 'lastUpdatedBy',
+          'createdAt', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == sessionId && data.id.size() <= 128)) &&
+        data.status in ['SCHEDULED', 'OPEN', 'CLOSED'] &&
+        (
+          ('labId' in data && data.labId is string && data.labId.size() >= 1) ||
+          ('scheduleId' in data && data.scheduleId is string && data.scheduleId.size() >= 1)
+        ) &&
+        isValidOptionalString(data, 'labId', 0, 128) &&
+        isValidOptionalString(data, 'courseId', 0, 128) &&
+        isValidOptionalString(data, 'asprakId', 0, 128) &&
+        isValidOptionalString(data, 'title', 1, 200) &&
+        (!('sessionNumber' in data) || (data.sessionNumber is number && data.sessionNumber >= 0 && data.sessionNumber <= 1000)) &&
+        isValidOptionalTimestampOrIso(data, 'startAt') &&
+        isValidOptionalTimestampOrIso(data, 'endAt') &&
+        isValidOptionalTimestampOrIso(data, 'openedAt') &&
+        isValidOptionalTimestampOrIso(data, 'closedAt') &&
+        (!('configSnapshot' in data) || isValidAttendanceConfig(data.configSnapshot)) &&
+        isValidOptionalString(data, 'classId', 0, 128) &&
+        isValidOptionalString(data, 'scheduleId', 0, 128) &&
+        isValidOptionalString(data, 'assistantId', 0, 128) &&
+        isValidOptionalString(data, 'lastUpdatedBy', 0, 128) &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidAttendance(data, attendanceId) {
+      return data.keys().hasAll(['sessionId']) &&
+        data.keys().hasOnly([
+          'id', 'sessionId', 'labId', 'studentId', 'userId', 'status',
+          'checkedInAt', 'recordedAt', 'isLate', 'lateMinutes',
+          'latitude', 'longitude', 'accuracy', 'distanceMeters',
+          'method', 'qrCodeToken', 'createdAt', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == attendanceId && data.id.size() <= 256)) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        (
+          ('studentId' in data && data.studentId is string && data.studentId.size() >= 1 && data.studentId.size() <= 128) ||
+          ('userId' in data && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128)
+        ) &&
+        isValidOptionalString(data, 'labId', 0, 128) &&
+        isValidOptionalString(data, 'studentId', 1, 128) &&
+        isValidOptionalString(data, 'userId', 1, 128) &&
+        (!('status' in data) || data.status in ['PRESENT', 'EXCUSED', 'ABSENT']) &&
+        isValidOptionalTimestampOrIso(data, 'checkedInAt') &&
+        isValidOptionalTimestampOrIso(data, 'recordedAt') &&
+        (!('isLate' in data) || data.isLate is bool) &&
+        (!('lateMinutes' in data) || (data.lateMinutes is number && data.lateMinutes >= 0 && data.lateMinutes <= 1440)) &&
+        (!('latitude' in data) || isValidLatitude(data.latitude)) &&
+        (!('longitude' in data) || isValidLongitude(data.longitude)) &&
+        (!('accuracy' in data) || data.accuracy == null || (data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100000)) &&
+        (!('distanceMeters' in data) || (data.distanceMeters is number && data.distanceMeters >= 0 && data.distanceMeters <= 1000000)) &&
+        (!('method' in data) || data.method in ['LOCATION', 'QR', 'MANUAL']) &&
+        isValidOptionalString(data, 'qrCodeToken', 0, 512) &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidFine(data, fineId) {
+      return data.keys().hasAll(['studentId', 'sessionId', 'labId', 'amount', 'reason', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'sessionId', 'labId', 'amount', 'reason',
+          'status', 'createdAt', 'paidAt', 'waivedAt', 'waivedBy', 'updatedAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == fineId && data.id.size() <= 256)) &&
+        data.studentId is string && data.studentId.size() >= 1 && data.studentId.size() <= 128 &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.labId is string && data.labId.size() >= 1 && data.labId.size() <= 128 &&
+        fineId == data.sessionId + '_' + data.studentId &&
+        data.amount is number && data.amount >= 0 && data.amount <= 100000000 &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 500 &&
+        data.status in ['unpaid', 'pending', 'paid', 'waived'] &&
+        isValidTimestampOrIso(data.createdAt) &&
+        isValidOptionalTimestampOrIso(data, 'paidAt') &&
+        isValidOptionalTimestampOrIso(data, 'waivedAt') &&
+        isValidOptionalString(data, 'waivedBy', 0, 128) &&
+        isValidOptionalTimestampOrIso(data, 'updatedAt');
+    }
+
+    function isValidNotification(data, notificationId) {
+      return data.keys().hasAll(['userId', 'title', 'body', 'type', 'isRead', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'title', 'body', 'type', 'data', 'isRead', 'createdAt'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == notificationId && data.id.size() <= 128)) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 1000 &&
+        data.type in ['fine_created', 'payment_success', 'payment_failed'] &&
+        (!('data' in data) || (data.data is map && data.data.keys().size() <= 20)) &&
+        data.isRead is bool &&
+        isValidTimestampOrIso(data.createdAt);
+    }
+
+    function isValidLeaveRequest(data, requestId) {
+      return data.keys().hasAll(['sessionId', 'userId', 'reason', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'sessionId', 'userId', 'userName', 'userEmail', 'category',
+          'reason', 'attachmentName', 'status', 'submittedAt',
+          'reviewedBy', 'reviewedByName', 'reviewedAt', 'reviewerNote',
+          'sentiment', 'aiAnalysis'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == requestId && data.id.size() <= 128)) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        isValidOptionalString(data, 'userName', 0, 120) &&
+        isValidOptionalString(data, 'userEmail', 0, 254) &&
+        (!('category' in data) || data.category in ['SAKIT', 'DISPENSASI', 'IZIN_AKADEMIK', 'LAINNYA']) &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 2000 &&
+        isValidOptionalString(data, 'attachmentName', 0, 255) &&
+        data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+        isValidOptionalTimestampOrIso(data, 'submittedAt') &&
+        isValidOptionalString(data, 'reviewedBy', 0, 128) &&
+        isValidOptionalString(data, 'reviewedByName', 0, 120) &&
+        isValidOptionalTimestampOrIso(data, 'reviewedAt') &&
+        isValidOptionalString(data, 'reviewerNote', 0, 1000) &&
+        (!('sentiment' in data) || data.sentiment == null || data.sentiment in ['positif', 'netral', 'negatif']) &&
+        isValidOptionalString(data, 'aiAnalysis', 0, 1000);
+    }
+
+    function isValidPermission(data, permissionId) {
+      return data.keys().hasAll(['sessionId', 'userId', 'reason', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'sessionId', 'userId', 'studentName', 'studentEmail',
+          'reason', 'sentiment', 'category', 'aiAnalysis', 'status',
+          'createdAt', 'reviewedBy', 'reviewedAt', 'reviewerNote'
+        ]) &&
+        (!('id' in data) || (data.id is string && data.id == permissionId && data.id.size() <= 128)) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        isValidOptionalString(data, 'studentName', 0, 120) &&
+        isValidOptionalString(data, 'studentEmail', 0, 254) &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 2000 &&
+        (!('sentiment' in data) || data.sentiment == null || data.sentiment in ['positif', 'netral', 'negatif']) &&
+        (!('category' in data) || data.category in [
+          'SAKIT', 'AKADEMIK', 'IZIN_AKADEMIK', 'DISPENSASI', 'DARURAT', 'LAINNYA', 'Unclassified'
+        ]) &&
+        isValidOptionalString(data, 'aiAnalysis', 0, 1000) &&
+        data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+        isValidOptionalTimestampOrIso(data, 'createdAt') &&
+        isValidOptionalString(data, 'reviewedBy', 0, 128) &&
+        isValidOptionalTimestampOrIso(data, 'reviewedAt') &&
+        isValidOptionalString(data, 'reviewerNote', 0, 1000);
+    }
+
+    // ===============================================================
+    // 1. USERS (Strict Anti-Escalation RBAC)
+    // ===============================================================
+    match /users/{userId} {
       allow read: if isAuthenticated();
-      // Hanya role Asisten yang berhak membuat, mengedit, atau menghapus kelas
-      allow write: if isAssistant();
+
+      // Self-registration is strictly locked to role == 'praktikan';
+      // Aslab may provision/seed user accounts.
+      allow create: if isAuthenticated() &&
+        isValidUser(request.resource.data, userId) && (
+          (isOwner(userId) && uidUnchanged() && request.resource.data.role == 'praktikan') ||
+          isAslab()
+        );
+
+      // Owners can update their own profile without altering role, uid, or createdAt;
+      // Aslab may manage user records.
+      allow update: if isAuthenticated() &&
+        isValidUser(request.resource.data, userId) && (
+          (
+            isOwner(userId) &&
+            uidNotModified() &&
+            request.resource.data.role == resource.data.role &&
+            (!('createdAt' in resource.data) || areImmutableFieldsUnchanged(['createdAt']))
+          ) ||
+          isAslab()
+        );
+
+      allow delete: if false;
+    }
+
+    // ===============================================================
+    // 2. DEV A OWNED COLLECTIONS (courses, labs, labMembers)
+    // ===============================================================
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAslab() && isValidCourse(request.resource.data, courseId);
+      allow delete: if isAslab();
+    }
+
+    match /labs/{labId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAslab() && isValidLab(request.resource.data, labId);
+      allow delete: if isAslab();
+    }
+
+    match /labMembers/{memberId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAslab() && isValidLabMember(request.resource.data, memberId);
+      allow delete: if isAslab();
+    }
+
+    // ===============================================================
+    // 3. CLASSES, SCHEDULES, SESSIONS & STATUS LOGS
+    // ===============================================================
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isStaff() && isValidClass(request.resource.data, classId);
+      allow delete: if isStaff();
     }
 
     match /schedules/{scheduleId} {
-      // Praktikan dan asisten dapat melihat jadwal praktikum
       allow read: if isAuthenticated();
-      // Hanya role Asisten yang berhak membuat, mengedit, atau menghapus jadwal
-      allow write: if isAssistant();
+      allow create, update: if isStaff() && isValidSchedule(request.resource.data, scheduleId);
+      allow delete: if isStaff();
     }
 
-    // ==========================================
-    // 3. KOLEKSI SESSIONS & STATUS LOGS (SRS-07 & SRS-08)
-    // ==========================================
     match /sessions/{sessionId} {
-      // Praktikan dan asisten dapat melihat jadwal & status sesi
       allow read: if isAuthenticated();
-      // Hanya role Asisten yang berhak membuka/menutup sesi (OPEN/CLOSED) atau mengubah jadwal
-      allow write: if isAssistant();
+      allow create, update: if isStaff() && isValidSession(request.resource.data, sessionId);
+      allow delete: if isStaff();
     }
 
     match /status_logs/{logId} {
-      // Praktikan dan asisten dapat membaca riwayat status sesi
       allow read: if isAuthenticated();
-      // Hanya role Asisten yang berhak mencatat riwayat perubahan status sesi
-      allow write: if isAssistant();
+      allow create, update: if isStaff() && isValidStatusLog(request.resource.data, logId);
+      allow delete: if isStaff();
     }
 
-    // ==========================================
-    // 4. KOLEKSI ATTENDANCE (Presensi Praktikan - SRS-05 & SRS-06)
-    // ==========================================
+    match /session_status_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isStaff() && isValidStatusLog(request.resource.data, logId);
+      allow delete: if isStaff();
+    }
+
+    // ===============================================================
+    // 4. ATTENDANCES (Sprint 4) & ATTENDANCE (Legacy)
+    // ===============================================================
+    match /attendances/{attendanceId} {
+      allow read: if isAuthenticated() && (
+        isAttendanceOwner(resource.data) || isStaff()
+      );
+
+      allow create: if isAuthenticated() &&
+        isValidAttendance(request.resource.data, attendanceId) && (
+          (
+            isSelfAttendanceCreate(request.resource.data) &&
+            (!('status' in request.resource.data) || request.resource.data.status == 'PRESENT')
+          ) ||
+          isStaff()
+        );
+
+      allow update: if isStaff() &&
+        isValidAttendance(request.resource.data, attendanceId) &&
+        request.resource.data.sessionId == resource.data.sessionId &&
+        (!('studentId' in resource.data) || !('studentId' in request.resource.data) || request.resource.data.studentId == resource.data.studentId) &&
+        (!('userId' in resource.data) || !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId);
+
+      allow delete: if isStaff();
+    }
+
     match /attendance/{attendanceId} {
-      // Praktikan bisa melihat riwayat presensi miliknya; Asisten bisa melihat rekap semua presensi
       allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || isAssistant()
+        isAttendanceOwner(resource.data) || isStaff()
       );
 
-      // Praktikan hanya bisa mencatat kehadiran atas nama dirinya sendiri
       allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid;
+        isValidAttendance(request.resource.data, attendanceId) && (
+          (
+            isSelfAttendanceCreate(request.resource.data) &&
+            (!('status' in request.resource.data) || request.resource.data.status == 'PRESENT')
+          ) ||
+          isStaff()
+        );
 
-      // Hanya Asisten yang diizinkan mengoreksi atau menghapus data kehadiran
-      allow update, delete: if isAssistant();
+      allow update: if isStaff() &&
+        isValidAttendance(request.resource.data, attendanceId) &&
+        request.resource.data.sessionId == resource.data.sessionId &&
+        (!('studentId' in resource.data) || !('studentId' in request.resource.data) || request.resource.data.studentId == resource.data.studentId) &&
+        (!('userId' in resource.data) || !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId);
+
+      allow delete: if isStaff();
     }
 
-    // ==========================================
-    // 5. KOLEKSI LEAVE_REQUESTS & PERMISSIONS (Pengajuan Izin - SRS-10 s/d SRS-14)
-    // ==========================================
-    match /leave_requests/{requestId} {
-      // Praktikan hanya bisa membaca izin miliknya; Asisten bisa membaca seluruh pengajuan izin
+    // ===============================================================
+    // 5. FINES & PAYMENTS (Sprint 4 Dev B & Dev C)
+    // ===============================================================
+    match /fines/{fineId} {
       allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || isAssistant()
+        resource.data.studentId == request.auth.uid || isStaff()
+      );
+      allow create, update: if isStaff() && isValidFine(request.resource.data, fineId);
+      allow delete: if isStaff();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid || isStaff()
+      );
+      // Writes are strictly restricted to server-side Firebase Admin SDK (Midtrans webhook/charge)
+      allow create, update, delete: if false;
+    }
+
+    // ===============================================================
+    // 6. NOTIFICATIONS (Sprint 4 Dev C)
+    // ===============================================================
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid;
+
+      allow create: if isStaff() &&
+        isValidNotification(request.resource.data, notificationId);
+
+      // Owner may only toggle isRead; all other fields must remain untouched
+      allow update: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
+        request.resource.data.isRead is bool &&
+        isValidNotification(request.resource.data, notificationId);
+
+      allow delete: if isStaff();
+    }
+
+    // ===============================================================
+    // 7. LEAVE REQUESTS & PERMISSIONS
+    // ===============================================================
+    match /leave_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isStaff()
       );
 
-      // Praktikan membuat pengajuan izin:
-      // - Wajib milik dirinya sendiri (userId == request.auth.uid)
-      // - Status awal WAJIB 'PENDING'
       allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.status == 'PENDING';
+        isValidLeaveRequest(request.resource.data, requestId) && (
+          (
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.status == 'PENDING' &&
+            !('reviewedBy' in request.resource.data) &&
+            !('reviewedByName' in request.resource.data) &&
+            !('reviewedAt' in request.resource.data) &&
+            !('reviewerNote' in request.resource.data)
+          ) ||
+          isStaff()
+        );
 
-      // Keputusan Izin (SRS-10):
-      // Hanya Asisten yang berhak mengubah status pengajuan izin (APPROVED / REJECTED)
-      allow update: if isAssistant();
+      allow update: if isStaff() &&
+        isValidLeaveRequest(request.resource.data, requestId) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.sessionId == resource.data.sessionId;
 
-      // Izin hanya bisa dihapus oleh asisten jika diperlukan
-      allow delete: if isAssistant();
+      allow delete: if isStaff();
     }
 
     match /permissions/{permissionId} {
       allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || isAssistant()
+        resource.data.userId == request.auth.uid || isStaff()
       );
+
       allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.status == 'PENDING';
-      allow update, delete: if isAssistant();
+        isValidPermission(request.resource.data, permissionId) && (
+          (
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.status == 'PENDING' &&
+            !('reviewedBy' in request.resource.data) &&
+            !('reviewedAt' in request.resource.data) &&
+            !('reviewerNote' in request.resource.data)
+          ) ||
+          isStaff()
+        );
+
+      allow update: if isStaff() &&
+        isValidPermission(request.resource.data, permissionId) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.sessionId == resource.data.sessionId;
+
+      allow delete: if isStaff();
     }
 
-    // ==========================================
-    // 6. KOLEKSI LABS (Laboratorium - SRS-07 Sprint 3)
-    // ==========================================
-    match /labs/{labId} {
-      // Praktikan dan asisten dapat membaca informasi lokasi laboratorium
-      allow read: if isAuthenticated();
-      // Hanya role Asisten yang berhak membuat, mengubah, atau menghapus laboratorium
-      allow write: if isAssistant();
+    // ===============================================================
+    // Default Deny Catch-All
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
-

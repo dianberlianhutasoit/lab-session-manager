@@ -64,7 +64,7 @@ export function LabActivitySheet({
 }: LabActivitySheetProps) {
   const theme = useTheme();
   const { profile } = useAuth();
-  const isAssistant = profile?.role === 'asisten';
+  const isAssistant = profile?.role === 'asprak' || profile?.role === 'aslab';
 
   // Hitung jarak perangkat ke laboratorium jika koordinat tersedia
   const distance = userLocation
