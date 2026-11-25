@@ -1,7 +1,9 @@
 import { Link, useRouter, type Href } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,12 +12,10 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  ActivityIndicator,
 } from 'react-native';
-import { Feather, MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useAuth, toAuthMessage } from '@/context/auth-context';
 import { LaboraColors } from '@/constants/theme';
-import Svg, { Path } from 'react-native-svg';
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const router = useRouter();
@@ -26,11 +26,13 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     status,
   } = useAuth();
 
-  const [selectedRole, setSelectedRole] = useState<'praktikan' | 'asisten'>('praktikan');
   const [name, setName] = useState('');
+  const [nim, setNim] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,21 +44,29 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       setError('Masukkan nama lengkap Anda.');
       return;
     }
+    if (isRegister && nim.trim().length < 4) {
+      setError('Masukkan Nomor Induk Mahasiswa (NIM) yang valid.');
+      return;
+    }
     if (!profilePending && !email.trim()) {
-      setError('Masukkan NIM atau email Anda.');
+      setError('Masukkan email akun SSO Universitas Anda.');
       return;
     }
     if (!profilePending && password.length < 6) {
       setError('Kata sandi minimal terdiri dari 6 karakter.');
       return;
     }
+    if (isRegister && password !== confirmPassword) {
+      setError('Konfirmasi kata sandi tidak cocok.');
+      return;
+    }
     setError('');
     setBusy(true);
     try {
       if (profilePending) {
-        await completePractitionerProfile(name);
+        await completePractitionerProfile(name, nim);
       } else if (isRegister) {
-        await register(name, email, password);
+        await register(name, email, password, nim);
       } else {
         await login(email, password);
       }
@@ -71,20 +81,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const handleForgotPassword = () => {
     Alert.alert(
       'Lupa Kata Sandi',
-      'Silakan hubungi Asisten Lab atau Administrator SSO Universitas untuk mereset kata sandi akun Anda.',
+      'Silakan hubungi Administrator Lab atau Helpdesk SSO Universitas untuk mereset kata sandi akun Anda.',
       [{ text: 'Mengerti' }]
     );
-  };
-
-  const handleQuickDemo = (role: 'praktikan' | 'asisten') => {
-    setSelectedRole(role);
-    if (role === 'praktikan') {
-      setEmail('praktikan@student.univ.ac.id');
-      setPassword('password123');
-    } else {
-      setEmail('asisten@univ.ac.id');
-      setPassword('password123');
-    }
   };
 
   return (
@@ -100,25 +99,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         {/* Top Logo and Header */}
         <View style={styles.headerContainer}>
           <View style={styles.logoBadge}>
-            <Svg width={46} height={46} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M9 3H15M10 3V8.5L5.5 17C4.8 18.2 5.7 19.8 7.1 19.8H16.9C18.3 19.8 19.2 18.2 18.5 17L14 8.5V3"
-                stroke={LaboraColors.primary}
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <Path
-                d="M12 6L16 4.5L12 3L8 4.5L12 6Z"
-                fill={LaboraColors.primary}
-              />
-              <Path
-                d="M7.5 16C9 14.8 11 16.5 12.5 15.5C14 14.5 15.5 16 16.5 15.5"
-                stroke={LaboraColors.primary}
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </Svg>
+            <Image
+              source={require('@/../assets/images/labora-logo.png')}
+              style={styles.logoImage}
+              resizeMode="cover"
+            />
           </View>
 
           <View style={styles.suitePill}>
@@ -128,59 +113,8 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
           <Text style={styles.brandTitle}>LABORA</Text>
           <Text style={styles.brandSubtitle}>
-            LABORA — Sistem Manajemen Praktikum Universitas Terintegrasi
+            Sistem Manajemen Presensi & Jadwal Praktikum Terintegrasi
           </Text>
-        </View>
-
-        {/* Role Toggle Selector */}
-        <View style={styles.roleToggleWrapper}>
-          <TouchableOpacity
-            style={[
-              styles.roleToggleBtn,
-              selectedRole === 'praktikan' && styles.roleToggleBtnActive,
-            ]}
-            onPress={() => setSelectedRole('praktikan')}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name="school-outline"
-              size={16}
-              color={selectedRole === 'praktikan' ? '#FFFFFF' : LaboraColors.textPrimary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
-              style={[
-                styles.roleToggleText,
-                selectedRole === 'praktikan' && styles.roleToggleTextActive,
-              ]}
-            >
-              Praktikan
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.roleToggleBtn,
-              selectedRole === 'asisten' && styles.roleToggleBtnActive,
-            ]}
-            onPress={() => setSelectedRole('asisten')}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons
-              name="admin-panel-settings"
-              size={17}
-              color={selectedRole === 'asisten' ? '#FFFFFF' : LaboraColors.textPrimary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
-              style={[
-                styles.roleToggleText,
-                selectedRole === 'asisten' && styles.roleToggleTextActive,
-              ]}
-            >
-              Asprak
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Main Form Card */}
@@ -189,17 +123,15 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             {profilePending
               ? 'Lengkapi Profil'
               : isRegister
-              ? 'Daftar Akun Mahasiswa'
-              : 'Masuk ke Portal'}
+              ? 'Registrasi Akun Praktikan'
+              : 'Masuk Portal LABORA'}
           </Text>
           <Text style={styles.formSubtitle}>
             {profilePending
-              ? 'Lengkapi nama lengkap Anda untuk mengaktifkan akun.'
+              ? 'Lengkapi data identitas Anda untuk mengaktifkan akun.'
               : isRegister
-              ? 'Silakan daftarkan akun mahasiswa untuk mengakses sesi lab.'
-              : `Silakan lengkapi kredensial akun ${
-                  selectedRole === 'asisten' ? 'asisten lab' : 'mahasiswa'
-                } Anda.`}
+              ? 'Daftarkan data mahasiswa Anda untuk akses presensi dan jadwal lab.'
+              : 'Gunakan akun SSO resmi Universitas Anda untuk masuk ke sistem.'}
           </Text>
 
           {error ? (
@@ -227,23 +159,42 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             </View>
           )}
 
-          {/* Email / NIM Field */}
+          {/* NIM Field (for Register or Profile Complete) */}
+          {(isRegister || profilePending) && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Nomor Induk Mahasiswa (NIM)</Text>
+              <View style={styles.inputBox}>
+                <Ionicons name="card-outline" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="cth: 2110511001"
+                  placeholderTextColor={LaboraColors.textMuted}
+                  value={nim}
+                  onChangeText={setNim}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Email Field */}
           {!profilePending && (
             <View style={styles.inputGroup}>
               <View style={styles.inputLabelRow}>
                 <Text style={styles.inputLabel}>
-                  {selectedRole === 'asisten' ? 'Email Asisten Lab' : 'NIM / Email Mahasiswa'}
+                  {isRegister ? 'Email Mahasiswa' : 'Email Akun SSO Universitas'}
                 </Text>
-                <Text style={styles.inputLabelBadge}>SSO Universitas</Text>
+                <Text style={styles.inputLabelBadge}>SSO Terverifikasi</Text>
               </View>
               <View style={styles.inputBox}>
                 <Feather name="mail" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder={
-                    selectedRole === 'asisten'
-                      ? 'asisten@univ.ac.id'
-                      : 'nim@student.univ.ac.id'
+                    isRegister
+                      ? 'nim@student.univ.ac.id'
+                      : 'nama@univ.ac.id atau nim@student.univ.ac.id'
                   }
                   placeholderTextColor={LaboraColors.textMuted}
                   value={email}
@@ -263,7 +214,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 <Feather name="lock" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Masukkan kata sandi portal"
+                  placeholder="Masukkan kata sandi akun"
                   placeholderTextColor={LaboraColors.textMuted}
                   value={password}
                   onChangeText={setPassword}
@@ -276,6 +227,35 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 >
                   <Feather
                     name={showPassword ? 'eye-off' : 'eye'}
+                    size={16}
+                    color={LaboraColors.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Confirm Password Field (Only for Register) */}
+          {isRegister && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Konfirmasi Kata Sandi</Text>
+              <View style={styles.inputBox}>
+                <Feather name="check-circle" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ulangi kata sandi"
+                  placeholderTextColor={LaboraColors.textMuted}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowConfirmPassword((prev) => !prev)}
+                  style={styles.eyeBtn}
+                >
+                  <Feather
+                    name={showConfirmPassword ? 'eye-off' : 'eye'}
                     size={16}
                     color={LaboraColors.textSecondary}
                   />
@@ -305,48 +285,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <View style={styles.submitBtnContent}>
-                <Feather name="log-in" size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
+                <Feather name={isRegister ? 'user-plus' : 'log-in'} size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
                 <Text style={styles.submitBtnText}>
                   {profilePending
                     ? 'Simpan Profil'
                     : isRegister
-                    ? 'Daftar ke Portal LABORA'
+                    ? 'Daftar Akun Praktikan'
                     : 'Masuk ke Portal LABORA'}
                 </Text>
               </View>
             )}
           </TouchableOpacity>
-
-          {/* Quick Access Testing Divider */}
-          {!isRegister && !profilePending && (
-            <View style={styles.demoSection}>
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>AKSES CEPAT PENGUJIAN</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <View style={styles.demoButtonsRow}>
-                <TouchableOpacity
-                  style={styles.demoBtn}
-                  onPress={() => handleQuickDemo('praktikan')}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="user" size={13} color={LaboraColors.primary} style={{ marginRight: 5 }} />
-                  <Text style={styles.demoBtnText}>Demo Praktikan</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.demoBtn}
-                  onPress={() => handleQuickDemo('asisten')}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="shield" size={13} color={LaboraColors.primary} style={{ marginRight: 5 }} />
-                  <Text style={styles.demoBtnText}>Demo Asprak</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
         </View>
 
         {/* Switch Mode Footer */}
@@ -374,9 +323,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             <Feather name="shield" size={14} color={LaboraColors.primary} />
           </View>
           <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={styles.securityTitle}>PROTOKOL PRESENSI DIGITAL •</Text>
+            <Text style={styles.securityTitle}>SISTEM PRESENSI RESMI UNIVERSITAS</Text>
             <Text style={styles.securityDesc}>
-              Terkoneksi Jaringan Lab Universitas & GPS Geofencing Terverifikasi untuk validasi kehadiran real-time.
+              Tervalidasi GPS Geofencing laboratorium & tersinkronisasi real-time dengan database presensi akademik.
             </Text>
           </View>
         </View>
@@ -401,9 +350,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoBadge: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -411,10 +360,16 @@ const styles = StyleSheet.create({
     borderColor: '#F3D8DF',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
     elevation: 3,
-    marginBottom: 10,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
   },
   suitePill: {
     flexDirection: 'row',
@@ -446,38 +401,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 24,
     lineHeight: 17,
-  },
-  roleToggleWrapper: {
-    flexDirection: 'row',
-    backgroundColor: '#F3E8EC',
-    borderRadius: 16,
-    padding: 4,
-    width: '100%',
-    marginBottom: 16,
-  },
-  roleToggleBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  roleToggleBtnActive: {
-    backgroundColor: LaboraColors.primary,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  roleToggleText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: LaboraColors.textPrimary,
-  },
-  roleToggleTextActive: {
-    color: '#FFFFFF',
   },
   formCard: {
     width: '100%',
@@ -589,46 +512,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
-  },
-  demoSection: {
-    marginTop: 18,
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#EFE5EB',
-  },
-  dividerText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: LaboraColors.textMuted,
-    paddingHorizontal: 10,
-    letterSpacing: 0.6,
-  },
-  demoButtonsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  demoBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FAF5F7',
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#F0E2E7',
-  },
-  demoBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: LaboraColors.primary,
   },
   footerRow: {
     marginTop: 16,
