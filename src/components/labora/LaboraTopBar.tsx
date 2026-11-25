@@ -1,7 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
 import { LaboraColors } from '@/constants/theme';
 import { router } from 'expo-router';
 
@@ -21,29 +20,12 @@ interface LaboraTopBarProps {
 
 export function LaboraLogoIcon({ size = 32 }: { size?: number }) {
   return (
-    <View style={[styles.logoCircle, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Svg width={size * 0.7} height={size * 0.7} viewBox="0 0 24 24" fill="none">
-        {/* Flask shape */}
-        <Path
-          d="M9 3H15M10 3V8.5L5.5 17C4.8 18.2 5.7 19.8 7.1 19.8H16.9C18.3 19.8 19.2 18.2 18.5 17L14 8.5V3"
-          stroke={LaboraColors.primary}
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {/* Mortarboard / Graduation hat accent */}
-        <Path
-          d="M12 6L16 4.5L12 3L8 4.5L12 6Z"
-          fill={LaboraColors.primary}
-        />
-        {/* Bubbles / Liquid line */}
-        <Path
-          d="M7.5 16C9 14.8 11 16.5 12.5 15.5C14 14.5 15.5 16 16.5 15.5"
-          stroke={LaboraColors.primary}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </Svg>
+    <View style={[styles.logoCircle, { width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }]}>
+      <Image
+        source={require('@/../assets/images/labora-logo.png')}
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+      />
     </View>
   );
 }
