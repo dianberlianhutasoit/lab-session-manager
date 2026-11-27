@@ -10,40 +10,40 @@ import type {
 export const EARTH_RADIUS_METERS = 6371000;
 
 /**
- * Konfigurasi default lokasi laboratorium dan radius toleransi (50 meter)
+ * Konfigurasi default lokasi laboratorium dan radius toleransi (30 meter)
  */
 export const DEFAULT_LAB_LOCATION: LabLocationConfig = {
   room: "Default Lab",
   name: "Gedung Laboratorium Komputer Terpadu",
-  latitude: -6.974001,
-  longitude: 107.630348,
-  radiusMeters: 50,
+  latitude: 2.38324,
+  longitude: 99.14845,
+  radiusMeters: 30,
 };
 
 /**
- * Pemetaan koordinat laboratorium berdasarkan nama ruangan
+ * Pemetaan koordinat laboratorium berdasarkan nama ruangan (Sinkron dengan data Del / dummy.ts)
  */
 export const LAB_ROOM_LOCATIONS: Record<string, LabLocationConfig> = {
   "Lab Komputer 1": {
     room: "Lab Komputer 1",
     name: "Laboratorium Komputer 1 (Lt. 2)",
-    latitude: -6.974001,
-    longitude: 107.630348,
-    radiusMeters: 50,
+    latitude: 2.38324,
+    longitude: 99.14845,
+    radiusMeters: 30,
   },
   "Lab Komputer 2": {
     room: "Lab Komputer 2",
-    name: "Laboratorium Komputer 2 (Lt. 2)",
-    latitude: -6.974025,
-    longitude: 107.630385,
-    radiusMeters: 50,
+    name: "Laboratorium Komputer 2 (Lt. 3)",
+    latitude: 2.38340,
+    longitude: 99.14855,
+    radiusMeters: 30,
   },
   "Lab Jaringan": {
     room: "Lab Jaringan",
-    name: "Laboratorium Jaringan & Sistem (Lt. 3)",
-    latitude: -6.97398,
-    longitude: 107.63031,
-    radiusMeters: 50,
+    name: "Laboratorium Jaringan & Sistem (Lt. 1)",
+    latitude: 2.38310,
+    longitude: 99.14825,
+    radiusMeters: 35,
   },
 };
 

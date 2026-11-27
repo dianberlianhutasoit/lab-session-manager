@@ -44,5 +44,12 @@ example
 /ios
 /android
 
+# personal notes
+programmer3.md
+
 # Firebase configuration
 google-services.json
+*-firebase-adminsdk-*.json
+
+git_workflow.md
+sprint.md

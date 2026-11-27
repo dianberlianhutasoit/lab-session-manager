@@ -1,24 +1,24 @@
 import React, { useState } from 'react';
 import {
   Modal,
-  View,
-  StyleSheet,
+  Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   TextInput,
-  Platform,
+  View,
 } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Spacing } from '@/constants/theme';
+import { useSessionContext, type SessionWithDetails } from '@/context/session-context';
+import { useTheme } from '@/hooks/use-theme';
 import type {
   LabClass,
   SessionScheduleFormInput,
   SessionStatus,
   User,
 } from '@/types';
-import type { SessionWithDetails } from '@/context/session-context';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 
 interface SessionFormModalProps {
   visible: boolean;
@@ -56,6 +56,7 @@ function SessionFormContent({
   onSubmit,
 }: SessionFormModalProps) {
   const theme = useTheme();
+  const { labs } = useSessionContext();
   const isEditing = !!initialSession;
   const defaultClass = preselectedClass ?? classes[0] ?? null;
   const sch = initialSession?.schedule;
@@ -317,8 +318,27 @@ function SessionFormContent({
 
         <View style={styles.fieldGroup}>
           <ThemedText type="smallBold">Ruangan Pelaksanaan *</ThemedText>
+          {labs.length > 0 && (
+            <View style={styles.pillsContainer}>
+              {labs.map((l) => {
+                const isSelected = room.trim().toLowerCase() === l.name.trim().toLowerCase();
+                return (
+                  <Pressable
+                    key={l.id}
+                    onPress={() => setRoom(l.name)}
+                    style={[styles.optionPill, isSelected && styles.optionPillActive]}>
+                    <ThemedText
+                      type="small"
+                      style={[styles.optionPillText, isSelected && styles.optionPillTextActive]}>
+                      🔬 {l.name}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
           <TextInput
-            style={[styles.input, { color: theme.text }]}
+            style={[styles.input, { color: theme.text, marginTop: labs.length > 0 ? 6 : 0 }]}
             placeholder="Contoh: Lab Komputer 1"
             placeholderTextColor="#94A3B8"
             value={room}

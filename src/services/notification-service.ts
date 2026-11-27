@@ -94,8 +94,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     // 4. Ambil Project ID dari EAS Config / App Config
     const projectId =
       Constants?.expoConfig?.extra?.eas?.projectId ??
-      Constants?.easConfig?.projectId ??
-      'f094883d-e57d-419f-a4bd-ca3911f02c2b';
+      Constants?.easConfig?.projectId;
 
     const pushTokenData = await Notifications.getExpoPushTokenAsync({
       projectId,

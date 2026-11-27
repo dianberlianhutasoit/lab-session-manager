@@ -12,6 +12,10 @@
     },
     "android": {
       "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -26,6 +30,9 @@
     },
     "plugins": [
       "expo-router",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser",
       "@react-native-firebase/app",
       [
         "expo-splash-screen",
@@ -37,10 +44,29 @@
       ],
       "@react-native-firebase/auth",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Aplikasi membutuhkan izin lokasi untuk memverifikasi kehadiran di laboratorium dan menampilkan posisi Anda di peta.",
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "react-native-maps",
+        {}
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
           "color": "#208AEF"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "2.4.0"
+          }
         }
       ]
     ],
@@ -55,9 +81,9 @@
         }
       },
       "eas": {
-        "projectId": "f094883d-e57d-419f-a4bd-ca3911f02c2b"
+        "projectId": "067c0cdc-c653-4b51-b4cf-382d079d67c6"
       }
     },
-    "owner": "dianberlianhutasoit"
+    "owner": "ppk-praktikum"
   }
 }

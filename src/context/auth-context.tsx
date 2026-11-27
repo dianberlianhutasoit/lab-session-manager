@@ -18,8 +18,8 @@ interface AuthContextValue {
   status: AuthStatus;
   profile: User | null;
   error: string | null;
-  register: (name: string, email: string, password: string) => Promise<void>;
-  completePractitionerProfile: (name: string) => Promise<void>;
+  register: (name: string, email: string, password: string, nim?: string) => Promise<void>;
+  completePractitionerProfile: (name: string, nim?: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -65,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: data.name,
         email: data.email,
         role: data.role,
+        nim: typeof data.nim === 'string' ? data.nim : undefined,
         expoPushToken: typeof data.expoPushToken === 'string' ? data.expoPushToken : null,
       });
       setStatus('authenticated');
@@ -96,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [authUser, status]);
 
-  const register = useCallback(async (name: string, email: string, password: string) => {
+  const register = useCallback(async (name: string, email: string, password: string, nim?: string) => {
     setError(null);
     const credential = await createUserWithEmailAndPassword(firebaseAuth, email.trim(), password);
     try {
@@ -104,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: name.trim(),
         email: credential.user.email ?? email.trim(),
         role: 'praktikan',
+        nim: nim?.trim() || undefined,
         createdAt: new Date().toISOString(),
       });
     } catch (cause) {
@@ -119,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
   }, []);
 
-  const completePractitionerProfile = useCallback(async (name: string) => {
+  const completePractitionerProfile = useCallback(async (name: string, nim?: string) => {
     if (!authUser) throw new Error('Sesi login sudah berakhir. Masuk kembali untuk melanjutkan.');
     const profileRef = doc(firestore, 'users', authUser.uid);
     const displayName = name.trim();
@@ -127,7 +129,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await runTransaction(firestore, async (transaction) => {
       const existing = await transaction.get(profileRef);
       if (existing.exists()) throw new Error('Profil akun sudah ada tetapi belum valid. Hubungi administrator.');
-      transaction.set(profileRef, { name: displayName, email: authUser.email ?? '', role: 'praktikan', createdAt: new Date().toISOString() });
+      transaction.set(profileRef, {
+        name: displayName,
+        email: authUser.email ?? '',
+        role: 'praktikan',
+        nim: nim?.trim() || undefined,
+        createdAt: new Date().toISOString(),
+      });
     });
   }, [authUser]);
 

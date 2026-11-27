@@ -1,62 +1,75 @@
 import React, {
   createContext,
-  useContext,
-  useState,
-  useMemo,
   useCallback,
-  useRef,
+  useContext,
   useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 
+import type { LabClassWithDetails } from "@/components/asisten/class-card";
+import { isFirebaseConfigured } from "@/config/firebase";
 import {
-  users as initialUsers,
+  formatDistance,
+  LAB_ROOM_LOCATIONS,
+  validateLabRadius,
+} from "@/constants/lab-location";
+import { useAuth } from "@/context/auth-context";
+import { sendPushNotification } from "@/services/notification-service";
+import {
+  attendance as initialAttendance,
   classes as initialClasses,
+  labs as initialLabs,
+  leaveRequests as initialLeaveRequests,
+  permissions as initialPermissions,
   schedules as initialSchedules,
   sessions as initialSessions,
   statusLogs as initialStatusLogs,
-  attendance as initialAttendance,
-  leaveRequests as initialLeaveRequests,
-  permissions as initialPermissions,
+  users as initialUsers,
 } from '@/data/dummy';
-import { isFirebaseConfigured } from '@/config/firebase';
 import {
   COLLECTIONS,
-  subscribeToCollection,
-  seedInitialFirestoreDataIfEmpty,
-  firestoreCreateClass,
-  firestoreUpdateClass,
-  firestoreDeleteClass,
-  firestoreCreateSessionAndSchedule,
-  firestoreUpdateSessionAndSchedule,
-  firestoreDeleteSessionAndSchedule,
-  firestoreUpdateSessionStatus,
   firestoreBatchCloseSessions,
+  firestoreCreateClass,
+  firestoreCreateLab,
+  firestoreCreateSessionAndSchedule,
+  firestoreDeleteClass,
+  firestoreDeleteLab,
+  firestoreDeleteSessionAndSchedule,
   firestoreRecordAttendance,
   firestoreReviewLeaveRequest,
   firestoreSubmitLeaveRequest,
+  firestoreUpdateClass,
+  firestoreUpdateLab,
+  firestoreUpdateSessionAndSchedule,
+  firestoreUpdateSessionStatus,
+  seedInitialFirestoreDataIfEmpty,
+  subscribeToCollection,
 } from '@/services/firestore-service';
-import { sendPushNotification } from '@/services/notification-service';
-import { useAuth } from '@/context/auth-context';
 import type {
   Attendance,
+  AttendanceLocationPayload,
   AttendanceRecord,
+  Lab,
   LabClass,
   LabClassFormInput,
+  LabFormInput,
   LeaveCategory,
   LeaveRequest,
   LeaveStatus,
   Permission,
   PermissionCategory,
   PermissionStatus,
-  SentimentLabel,
   Schedule,
+  SentimentLabel,
   Session,
   SessionScheduleFormInput,
   SessionStatus,
   SessionStatusLog,
   User,
 } from '@/types';
-import type { LabClassWithDetails } from '@/components/asisten/class-card';
+import { distanceInMeters, findLabForRoom } from "@/utils/attendance-location";
 
 export interface SessionWithDetails extends Session {
   schedule?: Schedule;
@@ -104,7 +117,12 @@ interface SessionContextValue {
   isSessionUpdating: (sessionId: string) => boolean;
   getSessionStatusLogs: (sessionId: string) => SessionStatusLog[];
   // SRS-09 & SRS-10: Rekap Presensi Real-Time (onSnapshot) & Keputusan Izin (APPROVED / REJECTED)
-  recordAttendance: (sessionId: string, userId: string, recordedAt: string) => Promise<boolean>;
+  recordAttendance: (
+    sessionId: string,
+    userId: string,
+    recordedAt: string,
+    location?: AttendanceLocationPayload
+  ) => Promise<boolean>;
   reviewLeaveRequest: (
     requestId: string,
     decision: Exclude<LeaveStatus, 'PENDING'>,
@@ -134,6 +152,16 @@ interface SessionContextValue {
   }) => Permission;
   getPermissionsByUser: (userId: string) => Permission[];
   updatePermissionStatus: (permissionId: string, status: PermissionStatus) => void;
+  // SRS-07 & SRS-10 Sprint 3: Lokasi & Aktivitas Laboratorium
+  labs: Lab[];
+  createLab: (input: LabFormInput) => Promise<Lab>;
+  updateLab: (labId: string, input: Partial<LabFormInput>) => Promise<boolean>;
+  deleteLab: (labId: string) => Promise<boolean>;
+  getLabById: (labId: string) => Lab | undefined;
+  getLabActivity: (labNameOrId: string) => {
+    ongoing: { session: Session; schedule: Schedule } | null;
+    next: { session: Session; schedule: Schedule } | null;
+  };
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
@@ -148,6 +176,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [updatingSessionIds, setUpdatingSessionIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>(initialUsers);
   const [attendance, setAttendance] = useState<Attendance[]>(initialAttendance);
+  const [labs, setLabs] = useState<Lab[]>(initialLabs);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(initialLeaveRequests);
   const [reviewingLeaveIds, setReviewingLeaveIds] = useState<string[]>([]);
   const [lastRealtimeSyncAt, setLastRealtimeSyncAt] = useState<string>(
@@ -273,6 +302,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (items.length > 0) setUsers(items);
     });
 
+    const unsubLabs = subscribeToCollection<Lab>(COLLECTIONS.LABS, (items) => {
+      if (items.length > 0) {
+        setLabs(items);
+        markRealtimeSync();
+      }
+    });
+
     return () => {
       isMounted = false;
       unsubClasses?.();
@@ -282,6 +318,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unsubAttendance?.();
       unsubLeaves?.();
       unsubUsers?.();
+      unsubLabs?.();
     };
   }, [markRealtimeSync]);
 
@@ -503,6 +540,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      // SRS-15: Notifikasi broadcast ke seluruh praktikan saat jadwal diubah
+      const practitionerTokens = users
+        .filter((u) => u.role === "praktikan" && u.expoPushToken)
+        .map((u) => u.expoPushToken as string);
+
+      if (practitionerTokens.length > 0) {
+        void sendPushNotification({
+          to: practitionerTokens,
+          title: "📅 Jadwal Praktikum Diperbarui",
+          body: `Jadwal ${input.title.trim()} (${input.room.trim()}) telah diperbarui ke ${input.date.trim()} pukul ${input.startTime.trim()}-${input.endTime.trim()} WIB.`,
+          data: { screen: "/praktikan", sessionId },
+        }).catch((notifErr) => {
+          console.warn(
+            "[SessionContext] Gagal mengirim push notifikasi pembaruan jadwal:",
+            notifErr,
+          );
+        });
+      }
+
       // SRS-15: Pemicu push notification saat jadwal sesi diperbarui
       const courseTitle = input.title.trim() || 'Praktikum';
       const formattedTime = `${input.date.trim()} (${input.startTime.trim()} - ${input.endTime.trim()})`;
@@ -530,7 +586,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     },
-    [sessions, users, markRealtimeSync]
+    [sessions, users, markRealtimeSync],
   );
 
   // SRS-07: Delete Sesi & Jadwal Praktikum
@@ -608,11 +664,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((s) =>
           s.id === sessionId
             ? {
-                ...s,
-                status: targetStatus,
-                ...metadata,
-                updatedAt: now,
-              }
+              ...s,
+              status: targetStatus,
+              ...metadata,
+              updatedAt: now,
+            }
             : s
         )
       );
@@ -623,6 +679,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isFirebaseConfigured) {
           await firestoreUpdateSessionStatus(sessionId, targetStatus, metadata, newLog);
         }
+
+        // SRS-15: Push notification broadcast ke seluruh praktikan saat sesi dibuka
+        if (targetStatus === "OPEN") {
+          const schedule = schedules.find((sch) => sch.id === existing.scheduleId);
+          const practitionerTokens = users
+            .filter((u) => u.role === "praktikan" && u.expoPushToken)
+            .map((u) => u.expoPushToken as string);
+
+          if (practitionerTokens.length > 0) {
+            void sendPushNotification({
+              to: practitionerTokens,
+              title: "🟢 Sesi Praktikum Dibuka!",
+              body: `Sesi ${schedule?.title ?? "Praktikum"} (${schedule?.room ?? "Lab"}) telah dibuka. Silakan lakukan presensi sekarang.`,
+              data: { screen: `/praktikan/${sessionId}`, sessionId },
+            }).catch((notifErr) => {
+              console.warn(
+                "[SessionContext] Gagal mengirim push broadcast sesi dibuka:",
+                notifErr,
+              );
+            });
+          }
+        }
+
 
         // SRS-15: Pemicu push notification saat sesi praktikum dibuka
         if (targetStatus === 'OPEN' && existing.status !== 'OPEN') {
@@ -665,7 +744,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUpdatingSessionIds((prev) => prev.filter((id) => id !== sessionId));
       }
     },
-    [sessions, schedules, classes, users, currentAssistantId, markRealtimeSync]
+    [sessions, schedules, classes, users, currentAssistantId, markRealtimeSync],
   );
 
   const openSession = useCallback(
@@ -733,12 +812,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((s) =>
           targetIds.includes(s.id)
             ? {
-                ...s,
-                status: 'CLOSED' as SessionStatus,
-                closedAt: now,
-                lastUpdatedBy: effectiveActorId,
-                updatedAt: now,
-              }
+              ...s,
+              status: 'CLOSED' as SessionStatus,
+              closedAt: now,
+              lastUpdatedBy: effectiveActorId,
+              updatedAt: now,
+            }
             : s
         )
       );
@@ -783,9 +862,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // SRS-09: Mencatat presensi & memicu event pembaruan real-time
   const recordAttendance = useCallback(
-    async (sessionId: string, userId: string, recordedAt: string): Promise<boolean> => {
+    async (
+      sessionId: string,
+      userId: string,
+      recordedAt: string,
+      location?: AttendanceLocationPayload
+    ): Promise<boolean> => {
       const targetSession = sessions.find((s) => s.id === sessionId);
-      if (targetSession && targetSession.status !== 'OPEN') {
+      if (!targetSession) {
+        throw new Error('Sesi praktikum tidak ditemukan.');
+      }
+      if (targetSession.status !== 'OPEN') {
         throw new Error('Sesi ini sudah ditutup. Presensi tidak dapat dilakukan.');
       }
 
@@ -794,25 +881,95 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       );
       if (alreadyRecorded) return false;
 
+      let attendanceLocation: Pick<Attendance, 'latitude' | 'longitude' | 'distanceMeters' | 'method'> = {
+        method: 'MANUAL',
+      };
+      if (location) {
+        const schedule = schedules.find((item) => item.id === targetSession.scheduleId);
+        const roomName = schedule?.room;
+        const matchingLab = findLabForRoom(labs, roomName);
+
+        let calculatedDistance: number;
+
+        if (
+          matchingLab &&
+          location.latitude !== undefined &&
+          location.longitude !== undefined
+        ) {
+          calculatedDistance =
+            Math.round(
+              distanceInMeters(
+                location.latitude,
+                location.longitude,
+                matchingLab.latitude,
+                matchingLab.longitude,
+              ) * 10,
+            ) / 10;
+
+          if (calculatedDistance > matchingLab.radius) {
+            throw new Error(
+              `Presensi ditolak: Anda berada di luar radius laboratorium "${matchingLab.name}" (${formatDistance(
+                calculatedDistance,
+              )} > ${matchingLab.radius} m).`,
+            );
+          }
+        } else if (
+          roomName &&
+          (roomName.trim() in LAB_ROOM_LOCATIONS ||
+            Object.values(LAB_ROOM_LOCATIONS).some((l) =>
+              roomName.toLowerCase().includes(l.room.toLowerCase()),
+            ))
+        ) {
+          const validation = validateLabRadius(
+            {
+              latitude: location.latitude,
+              longitude: location.longitude,
+            },
+            roomName,
+          );
+
+          calculatedDistance = validation.distanceMeters;
+
+          if (!validation.isWithinRadius) {
+            throw new Error(
+              `Presensi ditolak: Anda berada di luar radius laboratorium (${formatDistance(
+                validation.distanceMeters,
+              )} > ${validation.maxRadiusMeters} m).`,
+            );
+          }
+        } else {
+          throw new Error(
+            `Presensi ditolak: Ruangan laboratorium "${roomName || "Tidak ditentukan"}" belum terdaftar pada master data. Hubungi asisten praktikum.`,
+          );
+        }
+        attendanceLocation = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          distanceMeters: calculatedDistance,
+          method: 'LOCATION',
+        };
+      }
+
       const newRecord: Attendance = {
         id: `attendance-${sessionId}-${userId}`,
         sessionId,
         userId,
         recordedAt,
+        ...attendanceLocation,
       };
+
+      if (isFirebaseConfigured) {
+        await firestoreRecordAttendance(newRecord);
+      }
 
       const nextAttendance = [...attendanceRef.current, newRecord];
       attendanceRef.current = nextAttendance;
       setAttendance(nextAttendance);
       markRealtimeSync();
 
-      if (isFirebaseConfigured) {
-        await firestoreRecordAttendance(newRecord);
-      }
-
       return true;
     },
-    [sessions, markRealtimeSync]
+    [sessions, schedules, labs, markRealtimeSync],
   );
 
   // SRS-10: Meninjau dan memberikan keputusan izin praktikan (APPROVED / REJECTED)
@@ -851,10 +1008,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((item) =>
           item.id === requestId
             ? {
-                ...item,
-                status: decision,
-                ...metadata,
-              }
+              ...item,
+              status: decision,
+              ...metadata,
+            }
             : item
         )
       );
@@ -862,9 +1019,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         prev.map((item) =>
           item.id === requestId
             ? {
-                ...item,
-                status: decision,
-              }
+              ...item,
+              status: decision,
+            }
             : item
         )
       );
@@ -874,6 +1031,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (isFirebaseConfigured) {
           await firestoreReviewLeaveRequest(requestId, decision, metadata);
         }
+
+        // SRS-16: Notifikasi ke praktikan bersangkutan saat izin disetujui / ditolak
+        const student = users.find((u) => u.id === existing.userId);
+        if (student?.expoPushToken) {
+          const isApproved = decision === "APPROVED";
+          void sendPushNotification({
+            to: student.expoPushToken,
+            title: isApproved
+              ? "✅ Izin Praktikum Disetujui"
+              : "❌ Izin Praktikum Ditolak",
+            body: `Permohonan izin Anda telah ${isApproved ? "disetujui" : "ditolak"} oleh ${metadata.reviewedByName}.${trimmedNote ? ` Catatan: "${trimmedNote}"` : ""}`,
+            data: { screen: "/praktikan/izin", requestId },
+          }).catch((notifErr) => {
+            console.warn(
+              "[SessionContext] Gagal mengirim push notifikasi keputusan izin:",
+              notifErr,
+            );
+          });
+        }
+
 
         // SRS-16: Pemicu push notification saat keputusan izin (APPROVED / REJECTED)
         const targetStudent = users.find((u) => u.id === existing.userId);
@@ -984,6 +1161,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             userName: student?.name ?? 'Praktikan Tidak Dikenal',
             userEmail: student?.email ?? '-',
             recordedAt: rec.recordedAt,
+            latitude: rec.latitude,
+            longitude: rec.longitude,
+            distanceMeters: rec.distanceMeters,
+            method: rec.method,
           };
         })
         .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
@@ -1072,6 +1253,168 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // SRS-07 Sprint 3: Pengelolaan Lokasi Laboratorium (CRUD Labs)
+  const createLab = useCallback(
+    async (input: LabFormInput): Promise<Lab> => {
+      if (!input.name || input.name.trim().length === 0) {
+        throw new Error('Nama laboratorium wajib diisi.');
+      }
+      const lat = Number(input.latitude);
+      const lng = Number(input.longitude);
+      const rad = Number(input.radius);
+
+      if (isNaN(lat) || lat < -90 || lat > 90) {
+        throw new Error('Latitude harus berupa angka antara -90 dan 90.');
+      }
+      if (isNaN(lng) || lng < -180 || lng > 180) {
+        throw new Error('Longitude harus berupa angka antara -180 dan 180.');
+      }
+      if (isNaN(rad) || rad <= 0) {
+        throw new Error('Radius presensi harus berupa angka positif.');
+      }
+
+      const now = new Date().toISOString();
+      const newLab: Lab = {
+        id: `lab-${Date.now()}`,
+        name: input.name.trim(),
+        code: input.code?.trim().toUpperCase(),
+        building: input.building?.trim() || 'Gedung Fasilkom',
+        latitude: lat,
+        longitude: lng,
+        radius: rad,
+        capacity: input.capacity ? Number(input.capacity) : undefined,
+        description: input.description?.trim(),
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setLabs((prev) => [newLab, ...prev]);
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreCreateLab(newLab);
+      }
+
+      return newLab;
+    },
+    [markRealtimeSync]
+  );
+
+  const updateLab = useCallback(
+    async (labId: string, input: Partial<LabFormInput>): Promise<boolean> => {
+      if (input.latitude !== undefined) {
+        const lat = Number(input.latitude);
+        if (isNaN(lat) || lat < -90 || lat > 90) {
+          throw new Error('Latitude harus antara -90 dan 90.');
+        }
+      }
+      if (input.longitude !== undefined) {
+        const lng = Number(input.longitude);
+        if (isNaN(lng) || lng < -180 || lng > 180) {
+          throw new Error('Longitude harus antara -180 dan 180.');
+        }
+      }
+      if (input.radius !== undefined) {
+        const rad = Number(input.radius);
+        if (isNaN(rad) || rad <= 0) {
+          throw new Error('Radius presensi harus lebih dari 0 meter.');
+        }
+      }
+
+      const now = new Date().toISOString();
+      setLabs((prev) =>
+        prev.map((l) => (l.id === labId ? { ...l, ...input, updatedAt: now } : l))
+      );
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreUpdateLab(labId, { ...input, updatedAt: now });
+      }
+
+      return true;
+    },
+    [markRealtimeSync]
+  );
+
+  const deleteLab = useCallback(
+    async (labId: string): Promise<boolean> => {
+      setLabs((prev) => prev.filter((l) => l.id !== labId));
+      markRealtimeSync();
+
+      if (isFirebaseConfigured) {
+        await firestoreDeleteLab(labId);
+      }
+
+      return true;
+    },
+    [markRealtimeSync]
+  );
+
+  const getLabById = useCallback(
+    (labId: string): Lab | undefined => {
+      return labs.find((l) => l.id === labId);
+    },
+    [labs]
+  );
+
+  // SRS-10 & SRS-11: Aktivitas Laboratorium Real-time (Sesi Berlangsung & Berikutnya)
+  const getLabActivity = useCallback(
+    (labNameOrId: string) => {
+      const targetLab = labs.find(
+        (l) => l.id === labNameOrId || l.name.toLowerCase() === labNameOrId.toLowerCase()
+      );
+      const targetName = targetLab ? targetLab.name.toLowerCase().trim() : labNameOrId.toLowerCase().trim();
+
+      const labSchedules = schedules.filter(
+        (s) => s.room && s.room.toLowerCase().trim() === targetName
+      );
+
+      const labItems = labSchedules
+        .map((sch) => {
+          const sess = sessions.find((s) => s.scheduleId === sch.id);
+          return sess ? { schedule: sch, session: sess } : null;
+        })
+        .filter((item): item is { schedule: Schedule; session: Session } => item !== null);
+
+      // 1. Sesi Ongoing: Prioritaskan status 'OPEN'
+      let ongoing = labItems.find((item) => item.session.status === 'OPEN') || null;
+
+      if (!ongoing) {
+        const now = new Date();
+        const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        ongoing =
+          labItems.find(
+            (item) =>
+              item.schedule.startTime <= currentHours && item.schedule.endTime >= currentHours
+          ) || null;
+      }
+
+      // 2. Sesi Berikutnya: Sesi mendatang
+      const now = new Date();
+      const currentHours = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const ongoingId = ongoing?.session.id;
+
+      const upcomingItems = labItems
+        .filter((item) => item.session.id !== ongoingId)
+        .filter((item) => {
+          if (ongoing) {
+            return item.schedule.startTime >= ongoing.schedule.endTime;
+          }
+          return item.schedule.startTime > currentHours;
+        })
+        .sort((a, b) => a.schedule.startTime.localeCompare(b.schedule.startTime));
+
+      const next = upcomingItems.length > 0 ? upcomingItems[0] : (labItems.find((i) => i.session.id !== ongoingId) || null);
+
+      return {
+        ongoing,
+        next,
+      };
+    },
+    [labs, schedules, sessions]
+  );
+
   const value = useMemo(
     () => ({
       classes,
@@ -1119,6 +1462,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       addPermission,
       getPermissionsByUser,
       updatePermissionStatus,
+      labs,
+      createLab,
+      updateLab,
+      deleteLab,
+      getLabById,
+      getLabActivity,
     }),
     [
       classes,
@@ -1165,6 +1514,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       addPermission,
       getPermissionsByUser,
       updatePermissionStatus,
+      labs,
+      createLab,
+      updateLab,
+      deleteLab,
+      getLabById,
+      getLabActivity,
     ]
   );
 

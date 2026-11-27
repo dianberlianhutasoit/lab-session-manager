@@ -1,47 +1,223 @@
-import { Stack } from "expo-router";
-import { FlatList, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { useSessionContext } from "@/context/session-context";
+import { CircularGauge } from "@/components/labora/CircularGauge";
+import { LaboraColors, MaxContentWidth, Spacing } from "@/constants/theme";
 import { useAuth } from "@/context/auth-context";
+import { useSessionContext } from "@/context/session-context";
+import { Feather } from "@expo/vector-icons";
+import { Stack, useRouter } from "expo-router";
+import { useMemo } from "react";
+import {
+  FlatList,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 export default function PraktikanRiwayatScreen() {
-  const { attendance, sessions, schedules } = useSessionContext();
+  const router = useRouter();
+  const { attendance, sessions, schedules, permissions } = useSessionContext();
   const { profile } = useAuth();
   const practitioner = profile;
-  const history = attendance
-    .filter((record) => record.userId === practitioner?.id)
-    .flatMap((record) => {
-      const session = sessions.find((item) => item.id === record.sessionId);
-      const schedule = session
-        ? schedules.find((item) => item.id === session.scheduleId)
-        : undefined;
-      return schedule ? [{ record, schedule }] : [];
-    })
-    .sort((a, b) => b.record.recordedAt.localeCompare(a.record.recordedAt));
+
+  const myAttendance = useMemo(() => {
+    return attendance
+      .filter((record) => record.userId === practitioner?.id)
+      .flatMap((record) => {
+        const session = sessions.find((item) => item.id === record.sessionId);
+        const schedule = session
+          ? schedules.find((item) => item.id === session.scheduleId)
+          : undefined;
+        return schedule ? [{ record, schedule, session }] : [];
+      })
+      .sort((a, b) => b.record.recordedAt.localeCompare(a.record.recordedAt));
+  }, [attendance, sessions, schedules, practitioner?.id]);
+
+  const myPermissions = useMemo(() => {
+    return permissions.filter((p) => p.userId === practitioner?.id);
+  }, [permissions, practitioner?.id]);
+
+  const hadirCount = myAttendance.length;
+  const izinCount = myPermissions.length;
+  const totalSessions = sessions.length;
+  const tepatWaktuCount = hadirCount;
+  const terlambatCount = 0;
+  const alpaCount = Math.max(0, totalSessions - (hadirCount + izinCount));
+
+  const attendanceRate = totalSessions > 0
+    ? Math.min(100, Math.round(((hadirCount + izinCount) / totalSessions) * 1000) / 10)
+    : (hadirCount > 0 ? 100 : 0);
+
+  const isUasEligible = attendanceRate >= 80;
+
+  const filteredHistory = myAttendance;
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ title: "Riwayat Kehadiran", headerBackTitle: "Kembali" }} />
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Top Bar Header */}
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          style={styles.iconNavBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <Feather name="arrow-left" size={20} color={LaboraColors.primary} />
+        </TouchableOpacity>
+
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarBrand}>LABORA</Text>
+          <Text style={styles.topBarTitle}>Izin & Riwayat</Text>
+        </View>
+
+        <View style={styles.avatarCircle}>
+          <Text style={styles.avatarInitial}>
+            {practitioner?.name?.trim().charAt(0).toUpperCase() || "P"}
+          </Text>
+        </View>
+      </View>
+
       <FlatList
-        data={history}
+        data={filteredHistory}
         keyExtractor={({ record }) => record.id}
         contentContainerStyle={styles.listContainer}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.header}>
-              <Text style={styles.title} numberOfLines={1}>{item.schedule.title}</Text>
-              <View style={styles.timeBadge}>
-                <Text style={styles.timeText}>{formatAttendanceTime(item.record.recordedAt)}</Text>
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.headerBlock}>
+            {/* 1. Cumulative Attendance Card (Screen 8 Stitch) */}
+            <View style={styles.cumulativeCard}>
+              <View style={styles.cumulativeHeaderRow}>
+                <Text style={styles.cumulativeSubtitle}>AKUMULASI KEHADIRAN</Text>
+                <Text style={styles.cumulativeSemester}>Semester Ganjil 2024/2025</Text>
+              </View>
+
+              {/* Gauge Row */}
+              <View style={styles.cumulativeGaugeRow}>
+                <View style={styles.gaugeCenterCol}>
+                  <CircularGauge
+                    percentage={attendanceRate}
+                    size={110}
+                    strokeWidth={10}
+                    color={LaboraColors.primary}
+                    trackColor="#F5EBF0"
+                    centerIcon="checkmark"
+                  />
+                  <Text style={styles.gaugeNumberText}>{attendanceRate}%</Text>
+                  <Text style={styles.gaugeSubText}>Tingkat Kehadiran</Text>
+                  <View style={[styles.uasEligiblePill, !isUasEligible && { backgroundColor: '#FEE2E2', borderColor: '#FECACA' }]}>
+                    <Feather name={isUasEligible ? "shield" : "alert-circle"} size={11} color={isUasEligible ? "#047857" : "#DC2626"} style={{ marginRight: 4 }} />
+                    <Text style={[styles.uasEligibleText, !isUasEligible && { color: "#DC2626" }]}>
+                      {isUasEligible ? "Memenuhi Syarat UAS" : "Belum Memenuhi Syarat (Min. 80%)"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 4 Mini Breakdown Boxes */}
+              <View style={styles.fourBoxGrid}>
+                <View style={styles.miniStatBox}>
+                  <Text style={styles.miniStatLabel}>Tepat Waktu</Text>
+                  <Text style={styles.miniStatNumber}>{tepatWaktuCount}</Text>
+                  <Text style={styles.miniStatSub}>Sesi</Text>
+                </View>
+
+                <View style={styles.miniStatBox}>
+                  <Text style={styles.miniStatLabel}>Terlambat</Text>
+                  <Text style={styles.miniStatNumber}>{terlambatCount}</Text>
+                  <Text style={styles.miniStatSub}>Sesi</Text>
+                </View>
+
+                <View style={styles.miniStatBox}>
+                  <Text style={styles.miniStatLabel}>Izin Sah</Text>
+                  <Text style={styles.miniStatNumber}>{izinCount}</Text>
+                  <Text style={styles.miniStatSub}>Sesi</Text>
+                </View>
+
+                <View style={styles.miniStatBox}>
+                  <Text style={styles.miniStatLabel}>Alpa</Text>
+                  <Text style={styles.miniStatNumber}>{alpaCount}</Text>
+                  <Text style={styles.miniStatSub}>Sesi</Text>
+                </View>
               </View>
             </View>
-            <Text style={styles.detailText}>Kode: <Text style={styles.detailHighlight}>{item.schedule.courseCode}</Text></Text>
-            <Text style={styles.detailText}>Tanggal: <Text style={styles.detailHighlight}>{item.schedule.date}</Text></Text>
-            <Text style={styles.detailText}>Ruangan: <Text style={styles.detailHighlight}>{item.schedule.room}</Text></Text>
+
+            {/* Filter Pill Row */}
+            <View style={styles.filterBarRow}>
+              <View style={styles.filterDropdownPill}>
+                <Text style={styles.filterDropdownText}>Semua Praktikum ⌄</Text>
+              </View>
+
+              <TouchableOpacity style={styles.calendarFilterBtn}>
+                <Feather name="calendar" size={16} color={LaboraColors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Timeline Heading */}
+            <View style={styles.timelineHeaderRow}>
+              <Text style={styles.timelineSectionTitle}>LOG PRESENSI TERKINI</Text>
+              <Text style={styles.timelineCountText}>
+                {filteredHistory.length} Log Tercatat
+              </Text>
+            </View>
+          </View>
+        }
+        renderItem={({ item, index }) => (
+          <View style={styles.timelineItemRow}>
+            {/* Timeline indicator with line */}
+            <View style={styles.timelineLeftCol}>
+              <View style={styles.timelineDot}>
+                <Feather name="check" size={12} color="#FFFFFF" />
+              </View>
+              {index < filteredHistory.length - 1 && <View style={styles.timelineLine} />}
+            </View>
+
+            {/* Timeline content card */}
+            <View style={styles.timelineCard}>
+              <View style={styles.timelineCardHeader}>
+                <Text style={styles.timelineCardTitle} numberOfLines={1}>
+                  {item.schedule.title}
+                </Text>
+                <View style={styles.badgePill}>
+                  <Text style={styles.badgePillText}>{item.schedule.courseCode}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.timelineCardModule}>
+                Modul {item.schedule.sessionNumber ?? 4} • Kelas {item.schedule.className ?? "TI-3A"}
+              </Text>
+
+              <View style={styles.timelineMetaRow}>
+                <Feather name="clock" size={12} color={LaboraColors.textMuted} />
+                <Text style={styles.timelineMetaText}>
+                  {formatAttendanceTime(item.record.recordedAt)}
+                </Text>
+              </View>
+
+              <View style={styles.timelineFooterRow}>
+                <View style={styles.gpsDistanceBadge}>
+                  <Feather name="navigation" size={11} color={LaboraColors.primary} />
+                  <Text style={styles.gpsDistanceText}>
+                    {item.record.distanceMeters !== undefined
+                      ? `Presisi GPS: ${item.record.distanceMeters}m`
+                      : `Verifikasi: ${item.record.method ?? "GPS"}`}
+                  </Text>
+                </View>
+
+                <View style={styles.onTimeBadge}>
+                  <Text style={styles.onTimeText}>Tepat Waktu</Text>
+                </View>
+              </View>
+            </View>
           </View>
         )}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>Belum ada riwayat</Text>
-            <Text style={styles.emptyText}>Presensi yang berhasil akan tampil di sini.</Text>
+            <Feather name="inbox" size={36} color={LaboraColors.textMuted} style={{ marginBottom: 12 }} />
+            <Text style={styles.emptyTitle}>Belum Ada Riwayat Presensi</Text>
+            <Text style={styles.emptyText}>
+              Presensi yang berhasil diverifikasi akan tercatat secara permanen pada log kehadiran ini.
+            </Text>
           </View>
         }
       />
@@ -50,23 +226,334 @@ export default function PraktikanRiwayatScreen() {
 }
 
 function formatAttendanceTime(recordedAt: string) {
-  return new Date(recordedAt).toLocaleString("id-ID", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  try {
+    const d = new Date(recordedAt);
+    return d.toLocaleString("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return "-";
+  }
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#12121A" },
-  listContainer: { padding: 20, paddingBottom: 40, flexGrow: 1 },
-  card: { backgroundColor: "#1E1E2A", borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#2D2D3D", borderLeftWidth: 4, borderLeftColor: "#50FA7B" },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 },
-  title: { color: "#F8F8F2", fontSize: 16, fontWeight: "bold", flex: 1 },
-  timeBadge: { backgroundColor: "rgba(80, 250, 123, 0.1)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: "#50FA7B" },
-  timeText: { color: "#50FA7B", fontSize: 12, fontWeight: "bold" },
-  detailText: { color: "#8BE9FD", fontSize: 13, marginTop: 3 },
-  detailHighlight: { color: "#F8F8F2", fontWeight: "500" },
-  emptyContainer: { alignItems: "center", justifyContent: "center", flex: 1, padding: 20 },
-  emptyTitle: { color: "#F8F8F2", fontSize: 18, fontWeight: "bold", marginBottom: 8 },
-  emptyText: { color: "#6272A4", fontSize: 14, textAlign: "center" },
+  safeArea: {
+    flex: 1,
+    backgroundColor: LaboraColors.background,
+  },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: Spacing.four,
+    paddingVertical: 12,
+    backgroundColor: LaboraColors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: LaboraColors.cardBorder,
+  },
+  iconNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: LaboraColors.card,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topBarCenter: {
+    alignItems: "center",
+  },
+  topBarBrand: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: LaboraColors.primary,
+    letterSpacing: 0.6,
+  },
+  topBarTitle: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  avatarCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: LaboraColors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitial: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  listContainer: {
+    paddingHorizontal: Spacing.four,
+    paddingTop: 16,
+    paddingBottom: 40,
+    maxWidth: MaxContentWidth,
+    alignSelf: "center",
+    width: "100%",
+  },
+  headerBlock: {
+    gap: 16,
+    marginBottom: 12,
+  },
+
+  /* Cumulative Attendance Card */
+  cumulativeCard: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 14,
+    shadowColor: LaboraColors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  cumulativeHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  cumulativeSubtitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: LaboraColors.textMuted,
+    letterSpacing: 0.6,
+  },
+  cumulativeSemester: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  cumulativeGaugeRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 4,
+  },
+  gaugeCenterCol: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  gaugeNumberText: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: LaboraColors.textPrimary,
+    marginTop: -8,
+  },
+  gaugeSubText: {
+    fontSize: 12,
+    color: LaboraColors.textMuted,
+  },
+  uasEligiblePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    marginTop: 4,
+  },
+  uasEligibleText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#047857",
+  },
+
+  /* 4 mini stat boxes */
+  fourBoxGrid: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  miniStatBox: {
+    flex: 1,
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 12,
+    padding: 10,
+    alignItems: "center",
+    gap: 2,
+  },
+  miniStatLabel: {
+    fontSize: 10,
+    color: LaboraColors.textMuted,
+    fontWeight: "600",
+  },
+  miniStatNumber: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: LaboraColors.textPrimary,
+  },
+  miniStatSub: {
+    fontSize: 9,
+    color: LaboraColors.textMuted,
+  },
+
+  /* Filter bar */
+  filterBarRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  filterDropdownPill: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+  },
+  filterDropdownText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: LaboraColors.textPrimary,
+  },
+  calendarFilterBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: LaboraColors.card,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Timeline heading */
+  timelineHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  timelineSectionTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: LaboraColors.textMuted,
+    letterSpacing: 0.6,
+  },
+  timelineCountText: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+
+  /* Timeline Items */
+  timelineItemRow: {
+    flexDirection: "row",
+    marginBottom: 12,
+  },
+  timelineLeftCol: {
+    width: 30,
+    alignItems: "center",
+  },
+  timelineDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: LaboraColors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: "#F0E4E8",
+    marginTop: 4,
+  },
+  timelineCard: {
+    flex: 1,
+    backgroundColor: LaboraColors.card,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 6,
+    marginLeft: 6,
+  },
+  timelineCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  timelineCardTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: LaboraColors.textPrimary,
+    flex: 1,
+    marginRight: 6,
+  },
+  badgePill: {
+    backgroundColor: LaboraColors.blush,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgePillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: LaboraColors.primary,
+  },
+  timelineCardModule: {
+    fontSize: 11,
+    color: LaboraColors.textSecondary,
+  },
+  timelineMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  timelineMetaText: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  timelineFooterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  gpsDistanceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  gpsDistanceText: {
+    fontSize: 11,
+    color: LaboraColors.primary,
+    fontWeight: "600",
+  },
+  onTimeBadge: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  onTimeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#047857",
+  },
+
+  /* Empty State */
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 36,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: LaboraColors.textPrimary,
+    marginBottom: 6,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: LaboraColors.textMuted,
+    textAlign: "center",
+  },
 });

@@ -61,7 +61,7 @@ export function SessionQRModal({
 
           {/* Sesi Info */}
           <View style={styles.sessionBox}>
-            <ThemedText type="defaultSemiBold" style={styles.sessionTitle}>
+            <ThemedText type="smallBold" style={styles.sessionTitle}>
               {session.schedule?.title ?? 'Sesi Praktikum'}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">

@@ -1,32 +1,37 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { DaftarRiwayatIzin } from '@/components/izin/daftar-riwayat-izin';
 import { FormPengajuanIzin } from '@/components/izin/form-pengajuan-izin';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, LaboraColors } from '@/constants/theme';
 import { useSessionContext } from '@/context/session-context';
-import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/context/auth-context';
 import { analyzePermissionReason } from '@/services/ai-sentiment';
+import type { PermissionCategory } from '@/types';
 
 export default function IzinPraktikanScreen() {
+  const router = useRouter();
   const safeAreaInsets = useSafeAreaInsets();
-  const theme = useTheme();
   const { addPermission } = useSessionContext();
+  const { profile } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'FORM' | 'RIWAYAT'>('FORM');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmitPermission = async (data: { sessionId: string; reason: string }) => {
+  const handleSubmitPermission = async (data: {
+    sessionId: string;
+    reason: string;
+    category?: PermissionCategory;
+  }) => {
     setIsSubmitting(true);
     try {
       // Integrasi AI On-Device: Model analisis sentimen lokal + deteksi kategori izin
@@ -36,7 +41,7 @@ export default function IzinPraktikanScreen() {
         sessionId: data.sessionId,
         reason: data.reason,
         sentiment: aiResult.label,
-        category: aiResult.category,
+        category: data.category ?? aiResult.category,
         aiAnalysis: aiResult.summary,
       });
 
@@ -53,43 +58,47 @@ export default function IzinPraktikanScreen() {
   };
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Pengajuan Izin Praktikum', headerBackTitle: 'Kembali' }} />
+    <View style={styles.outerContainer}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Top Bar Navigation */}
+      <View style={[styles.topBar, { paddingTop: Math.max(safeAreaInsets.top, 12) }]}>
+        <Pressable
+          style={styles.iconNavBtn}
+          onPress={() => router.back()}
+          hitSlop={8}>
+          <Feather name="arrow-left" size={20} color={LaboraColors.primary} />
+        </Pressable>
+
+        <View style={styles.topBarTitleCol}>
+          <ThemedText style={styles.brandTitle}>LABORA</ThemedText>
+          <ThemedText style={styles.pageSubtitle}>Formulir Izin</ThemedText>
+        </View>
+
+        <View style={styles.avatarCircle}>
+          <ThemedText style={styles.avatarInitial}>
+            {profile?.name?.trim().charAt(0).toUpperCase() || 'P'}
+          </ThemedText>
+        </View>
+      </View>
 
       <ScrollView
-        style={[styles.scrollView, { backgroundColor: theme.background }]}
+        style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: Math.max(insets.top, Spacing.three),
             paddingBottom: insets.bottom,
           },
         ]}>
         <View style={styles.container}>
-          {/* Header Banner */}
-          <View style={styles.header}>
-            <View style={styles.badgeRole}>
-              <ThemedText type="smallBold" style={styles.badgeRoleText}>
-                PORTAL PRAKTIKAN
-              </ThemedText>
-            </View>
-            <ThemedText type="title" style={styles.title}>
-              Layanan Izin Praktikum
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              SRS-11: Ajukan ketidakhadiran dengan alasan yang jelas dan pantau status persetujuan dari asisten lab.
-            </ThemedText>
-          </View>
-
           {/* Segmented Control / Tab Bar */}
           <View style={styles.tabBar}>
             <Pressable
               onPress={() => setActiveTab('FORM')}
               style={[styles.tabItem, activeTab === 'FORM' && styles.tabItemActive]}>
               <ThemedText
-                type="smallBold"
                 style={[styles.tabText, activeTab === 'FORM' && styles.tabTextActive]}>
-                ✍️ Form Pengajuan
+                Formulir Izin
               </ThemedText>
             </Pressable>
 
@@ -97,9 +106,8 @@ export default function IzinPraktikanScreen() {
               onPress={() => setActiveTab('RIWAYAT')}
               style={[styles.tabItem, activeTab === 'RIWAYAT' && styles.tabItemActive]}>
               <ThemedText
-                type="smallBold"
                 style={[styles.tabText, activeTab === 'RIWAYAT' && styles.tabTextActive]}>
-                📋 Riwayat Izin Saya
+                Riwayat Pengajuan
               </ThemedText>
             </Pressable>
           </View>
@@ -111,53 +119,84 @@ export default function IzinPraktikanScreen() {
               isLoading={isSubmitting}
             />
           ) : (
-            <ThemedView type="backgroundElement" style={styles.historyWrapper}>
+            <View style={styles.historyWrapper}>
               <DaftarRiwayatIzin />
-            </ThemedView>
+            </View>
           )}
         </View>
       </ScrollView>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  outerContainer: {
+    flex: 1,
+    backgroundColor: LaboraColors.background,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    paddingBottom: 12,
+    backgroundColor: LaboraColors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: LaboraColors.cardBorder,
+  },
+  iconNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: LaboraColors.card,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topBarTitleCol: {
+    alignItems: 'center',
+  },
+  brandTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LaboraColors.primary,
+    letterSpacing: 0.8,
+  },
+  pageSubtitle: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  avatarCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: LaboraColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     alignItems: 'center',
     paddingHorizontal: Spacing.four,
+    paddingTop: 16,
   },
   container: {
     width: '100%',
     maxWidth: MaxContentWidth,
-    gap: Spacing.four,
-  },
-  header: {
-    gap: 8,
-    marginTop: Spacing.two,
-  },
-  badgeRole: {
-    backgroundColor: '#E0F2FE',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  badgeRoleText: {
-    color: '#0369A1',
-    fontSize: 11,
-    letterSpacing: 0.5,
-  },
-  title: {
-    fontSize: 26,
-    lineHeight: 32,
+    gap: Spacing.three,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 12,
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 14,
     padding: 4,
     gap: 4,
   },
@@ -165,31 +204,30 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 10,
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
+    borderRadius: 11,
   },
   tabItemActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: LaboraColors.card,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
     elevation: 2,
   },
   tabText: {
-    color: '#64748B',
-    fontSize: 13,
+    color: LaboraColors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   tabTextActive: {
-    color: '#0F172A',
+    color: LaboraColors.primary,
+    fontWeight: '800',
   },
   historyWrapper: {
-    borderRadius: 16,
+    backgroundColor: LaboraColors.card,
+    borderRadius: 18,
     padding: Spacing.four,
     borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.06)',
+    borderColor: LaboraColors.cardBorder,
   },
 });
-

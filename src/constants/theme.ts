@@ -1,26 +1,116 @@
 /**
  * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://unistyl.es/), etc.
+ * LABORA Smart Laboratory Suite — Google Stitch Design System.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
+/**
+ * LABORA Smart Laboratory Suite (Google Stitch Design Tokens)
+ * Theme: Deep Wine / Maroon & Soft Rose Blush
+ */
+export const LaboraColors = {
+  // Brand Primary (Deep Wine / Maroon)
+  primary: '#661633',
+  primaryPressed: '#4E1026',
+  primaryText: '#FFFFFF',
+  primaryLight: '#8A2246',
+  primarySoft: '#FDF2F4',
+  blush: '#FDF2F4',
+  primaryBorder: '#F3D8DF',
+
+  // Surface & Background
+  background: '#FAF7F8',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F5F0F2',
+  surfaceAlt: '#F5F0F2',
+  card: '#FFFFFF',
+  cardBorder: '#F0E6EA',
+
+  // Typography & Content
+  text: '#1F151A',
+  textPrimary: '#1F151A',
+  textSecondary: '#7A6B74',
+  textMuted: '#A3969E',
+  inputBorder: '#E5D8DF',
+
+  // Semantic Status
+  success: '#10B981',
+  successDark: '#059669',
+  successSoft: '#ECFDF5',
+  successBorder: '#A7F3D0',
+
+  warning: '#F59E0B',
+  warningSoft: '#FEF3C7',
+  warningBorder: '#FDE68A',
+
+  danger: '#EF4444',
+  dangerSoft: '#FEE2E2',
+  dangerBorder: '#FECACA',
+
+  info: '#3B82F6',
+  infoSoft: '#EFF6FF',
+  infoBorder: '#BFDBFE',
+
+  // Role Badges
+  roleAsprakBg: '#FCE7EC',
+  roleAsprakText: '#661633',
+  rolePraktikanBg: '#F3E8FF',
+  rolePraktikanText: '#6B21A8',
+} as const;
+
+/**
+ * Backward compatibility alias for MemphisColors during migration
+ */
+export const MemphisColors = {
+  primary: LaboraColors.primary,
+  primaryPressed: LaboraColors.primaryPressed,
+  primaryText: LaboraColors.primaryText,
+  teal: LaboraColors.primary,
+  tealLight: LaboraColors.primaryLight,
+  mint: '#FCE7EC',
+  mintLight: LaboraColors.primarySoft,
+  mintSurface: LaboraColors.primarySoft,
+  blueActiveCircle: '#FCE7EC',
+  navy: LaboraColors.primary,
+  navyCard: '#521028',
+  slate: LaboraColors.textPrimary,
+  muted: LaboraColors.textSecondary,
+  underline: LaboraColors.inputBorder,
+  underlineActive: LaboraColors.primary,
+  error: LaboraColors.danger,
+  background: LaboraColors.background,
+  card: LaboraColors.card,
+  surface: LaboraColors.surfaceMuted,
+  cardBorder: LaboraColors.cardBorder,
+  roleAdminText: LaboraColors.roleAsprakText,
+  roleAdminBg: LaboraColors.roleAsprakBg,
+  roleStudentText: LaboraColors.rolePraktikanText,
+  roleStudentBg: LaboraColors.rolePraktikanBg,
+} as const;
+
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: LaboraColors.textPrimary,
+    background: LaboraColors.background,
+    backgroundElement: LaboraColors.surfaceMuted,
+    backgroundSelected: LaboraColors.primarySoft,
+    textSecondary: LaboraColors.textSecondary,
+    tint: LaboraColors.primary,
+    primary: LaboraColors.primary,
+    border: LaboraColors.cardBorder,
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: '#FAF7F8',
+    background: '#1F151A',
+    backgroundElement: '#2B1C24',
+    backgroundSelected: '#421626',
+    textSecondary: '#A3969E',
+    tint: LaboraColors.primaryLight,
+    primary: LaboraColors.primary,
+    border: '#3D2532',
   },
 } as const;
 
@@ -28,13 +118,9 @@ export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
@@ -52,14 +138,26 @@ export const Fonts = Platform.select({
 });
 
 export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
+  half: 4,
+  one: 8,
+  oneAndHalf: 12,
+  two: 16,
+  twoAndHalf: 20,
+  three: 24,
+  four: 32,
+  five: 40,
+  six: 48,
+  seven: 56,
+  eight: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+export const Radii = {
+  small: 8,
+  medium: 12,
+  large: 16,
+  xlarge: 20,
+  pill: 9999,
+} as const;
+
+export const BottomTabInset = 64;
+export const MaxContentWidth = 600;
