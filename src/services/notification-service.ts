@@ -1,9 +1,10 @@
-import Constants from 'expo-constants';
-import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
-import { AndroidImportance } from 'expo-notifications';
-import { router } from 'expo-router';
-import { Platform } from 'react-native';
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import * as Notifications from "expo-notifications";
+import { AndroidImportance } from "expo-notifications";
+import { router } from "expo-router";
+import { Platform } from "react-native";
+
 
 /**
  * Konfigurasi handler notifikasi saat aplikasi berada di latar depan (foreground).
@@ -24,8 +25,8 @@ export interface PushNotificationPayload {
   title: string;
   body: string;
   data?: Record<string, unknown>;
-  sound?: 'default' | null;
-  priority?: 'default' | 'normal' | 'high';
+  sound?: "default" | null;
+  priority?: "default" | "normal" | "high";
 }
 
 export interface PushNotificationResult {
@@ -43,9 +44,12 @@ export async function checkNotificationPermissionAsync(): Promise<boolean> {
   }
   try {
     const { status } = await Notifications.getPermissionsAsync();
-    return status === 'granted';
+    return status === "granted";
   } catch (error) {
-    console.warn('[NotificationService] Gagal memeriksa status izin notifikasi:', error);
+    console.warn(
+      "[NotificationService] Gagal memeriksa status izin notifikasi:",
+      error,
+    );
     return false;
   }
 }
@@ -54,40 +58,45 @@ export async function checkNotificationPermissionAsync(): Promise<boolean> {
  * Meminta izin pengguna dan mendaftarkan perangkat untuk menerima push notification.
  * Mengembalikan ExpoPushToken (string) jika berhasil, atau null jika gagal/ditolak.
  */
-export async function registerForPushNotificationsAsync(): Promise<string | null> {
+export async function registerForPushNotificationsAsync(): Promise<
+  string | null
+> {
   let token: string | null = null;
 
   // 1. Khusus Android: Atur notification channel wajib (Android 8.0+)
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'Default Notifications',
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "Default Notifications",
       importance: AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#208AEF',
-      sound: 'default',
+      lightColor: "#208AEF",
+      sound: "default",
     });
   }
 
   // 2. Verifikasi apakah berjalan di perangkat fisik
   if (!Device.isDevice) {
     console.warn(
-      '[NotificationService] Push notification hanya dapat dijalankan pada perangkat fisik.'
+      "[NotificationService] Push notification hanya dapat dijalankan pada perangkat fisik.",
     );
     return null;
   }
 
   // 3. Periksa dan minta izin pengguna
   try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
-    if (existingStatus !== 'granted') {
+    if (existingStatus !== "granted") {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
 
-    if (finalStatus !== 'granted') {
-      console.warn('[NotificationService] Izin akses notifikasi ditolak oleh pengguna.');
+    if (finalStatus !== "granted") {
+      console.warn(
+        "[NotificationService] Izin akses notifikasi ditolak oleh pengguna.",
+      );
       return null;
     }
 
@@ -101,7 +110,10 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     });
     token = pushTokenData.data;
   } catch (error) {
-    console.error('[NotificationService] Gagal mendapatkan Expo Push Token:', error);
+    console.error(
+      "[NotificationService] Gagal mendapatkan Expo Push Token:",
+      error,
+    );
     return null;
   }
 
@@ -113,45 +125,51 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
  * Endpoint resmi: https://exp.host/--/api/v2/push/send
  */
 export async function sendPushNotification(
-  payload: PushNotificationPayload
+  payload: PushNotificationPayload,
 ): Promise<PushNotificationResult> {
   const targetTokens: string[] = Array.isArray(payload.to)
-    ? payload.to.filter((t) => typeof t === 'string' && t.trim().length > 0)
-    : payload.to && typeof payload.to === 'string' && payload.to.trim().length > 0
+    ? payload.to.filter((t) => typeof t === "string" && t.trim().length > 0)
+    : payload.to &&
+        typeof payload.to === "string" &&
+        payload.to.trim().length > 0
       ? [payload.to.trim()]
       : [];
 
   if (targetTokens.length === 0) {
     return {
       success: false,
-      error: 'Tidak ada token push notification tujuan yang valid.',
+      error: "Tidak ada token push notification tujuan yang valid.",
     };
   }
 
   const messages = targetTokens.map((token) => ({
     to: token,
-    sound: payload.sound ?? 'default',
+    sound: payload.sound ?? "default",
     title: payload.title,
     body: payload.body,
     data: payload.data ?? {},
-    priority: payload.priority ?? 'high',
-    channelId: 'default',
+    priority: payload.priority ?? "high",
+    channelId: "default",
   }));
 
   try {
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
       headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
+        Accept: "application/json",
+        "Accept-encoding": "gzip, deflate",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(messages),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('[NotificationService] Gagal mengirim push notification:', response.status, errText);
+      console.error(
+        "[NotificationService] Gagal mengirim push notification:",
+        response.status,
+        errText,
+      );
       return {
         success: false,
         error: `HTTP ${response.status}: ${errText}`,
@@ -161,10 +179,16 @@ export async function sendPushNotification(
     const data = await response.json();
     return { success: true, response: data };
   } catch (error) {
-    console.error('[NotificationService] Kesalahan jaringan saat mengirim notifikasi:', error);
+    console.error(
+      "[NotificationService] Kesalahan jaringan saat mengirim notifikasi:",
+      error,
+    );
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Kesalahan jaringan tidak diketahui',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Kesalahan jaringan tidak diketahui",
     };
   }
 }
@@ -175,41 +199,40 @@ export async function sendPushNotification(
  */
 export function setupNotificationListeners(
   onNotificationReceived?: (notification: Notifications.Notification) => void,
-  onNotificationResponse?: (response: Notifications.NotificationResponse) => void
+  onNotificationResponse?: (
+    response: Notifications.NotificationResponse,
+  ) => void,
 ): () => void {
-  const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
-    if (onNotificationReceived) {
-      onNotificationReceived(notification);
-    }
-  });
+  const receivedSubscription = Notifications.addNotificationReceivedListener(
+    (notification) => {
+      if (onNotificationReceived) {
+        onNotificationReceived(notification);
+      }
+    },
+  );
 
-  const responseSubscription = Notifications.addNotificationResponseReceivedListener(
-    (response) => {
+  const responseSubscription =
+    Notifications.addNotificationResponseReceivedListener((response) => {
       if (onNotificationResponse) {
         onNotificationResponse(response);
       } else {
-        // Navigasi otomatis default jika ada payload `screen` atau `url`
-        const data = response.notification.request.content.data;
-        if (data && typeof data === 'object') {
-          const targetScreen =
-            (data as { screen?: string; url?: string }).screen ??
-            (data as { screen?: string; url?: string }).url;
+        const targetScreen = (
+          response.notification.request.content.data as { url?: string }
+        ).url;
 
-          if (targetScreen && typeof targetScreen === 'string') {
-            try {
-              // Navigasi ke rute tujuan menggunakan Expo Router
-              router.push(targetScreen as any);
-            } catch (navError) {
-              console.error(
-                '[NotificationService] Gagal melakukan navigasi ke rute dari notifikasi:',
-                navError
-              );
-            }
+        if (targetScreen && typeof targetScreen === "string") {
+          try {
+            // Navigasi ke rute tujuan menggunakan Expo Router
+            router.push(targetScreen as any);
+          } catch (navError) {
+            console.error(
+              "[NotificationService] Gagal melakukan navigasi ke rute dari notifikasi:",
+              navError,
+            );
           }
         }
       }
-    }
-  );
+    });
 
   return () => {
     receivedSubscription.remove();

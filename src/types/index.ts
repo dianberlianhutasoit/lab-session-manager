@@ -114,6 +114,12 @@ export interface SessionStatusLog {
   changedAt: string;
 }
 
+export interface Notification {
+  id: string;
+  isRead: boolean;
+  [key: string]: unknown;
+}
+
 export type AttendanceMethod = "LOCATION" | "QR" | "MANUAL";
 
 export interface Coordinates {
