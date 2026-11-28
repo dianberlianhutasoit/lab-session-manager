@@ -100,9 +100,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         <View style={styles.headerContainer}>
           <View style={styles.logoBadge}>
             <Image
-              source={require('@/../assets/images/labora-logo.png')}
+              source={require('@/assets/images/logo_labora.png')}
               style={styles.logoImage}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           </View>
 
@@ -113,7 +113,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
           <Text style={styles.brandTitle}>LABORA</Text>
           <Text style={styles.brandSubtitle}>
-            Sistem Manajemen Presensi & Jadwal Praktikum Terintegrasi
+            Sistem Manajemen Laboratorium
           </Text>
         </View>
 
@@ -367,9 +367,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   logoImage: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 50,
+    height: 50,
   },
   suitePill: {
     flexDirection: 'row',
