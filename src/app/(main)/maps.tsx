@@ -5,10 +5,11 @@ import {
   Pressable,
   Platform,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import MapView, { PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Region, Polyline } from 'react-native-maps';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,7 +21,7 @@ import { UserMarker } from '@/components/maps/user-marker';
 import { LabActivitySheet } from '@/components/maps/lab-activity-sheet';
 import { MapFallbackList } from '@/components/maps/map-fallback-list';
 import { LabFormModal } from '@/components/asisten/lab-form-modal';
-import { Spacing } from '@/constants/theme';
+import { Spacing, LaboraColors } from '@/constants/theme';
 
 export default function MapsScreen() {
   const insets = useSafeAreaInsets();
@@ -43,8 +44,18 @@ export default function MapsScreen() {
     timeInterval: 5000,
   });
 
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const isMapKeyConfigured = Boolean(
+    mapsApiKey &&
+    mapsApiKey !== 'NOT_CONFIGURED' &&
+    mapsApiKey !== 'YOUR_GOOGLE_MAPS_API_KEY' &&
+    mapsApiKey !== 'your_google_maps_api_key'
+  );
+
   const [selectedLab, setSelectedLab] = useState<Lab | null>(null);
-  const [viewMode, setViewMode] = useState<'map' | 'list'>(Platform.OS === 'web' ? 'list' : 'map');
+  const [viewMode, setViewMode] = useState<'map' | 'list'>(
+    Platform.OS === 'web' || !isMapKeyConfigured ? 'list' : 'map'
+  );
 
   // Assistant management modal
   const [editingLab, setEditingLab] = useState<Lab | null>(null);
@@ -118,17 +129,30 @@ export default function MapsScreen() {
   const handleSelectLab = useCallback((lab: Lab) => {
     setSelectedLab(lab);
     if (Platform.OS !== 'web' && viewMode === 'map') {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: lab.latitude - 0.001, // Sedikit offset agar tidak tertutup bottom sheet
-          longitude: lab.longitude,
-          latitudeDelta: 0.004,
-          longitudeDelta: 0.004,
-        },
-        600
-      );
+      if (userLocation) {
+        mapRef.current?.fitToCoordinates(
+          [
+            { latitude: userLocation.latitude, longitude: userLocation.longitude },
+            { latitude: lab.latitude, longitude: lab.longitude },
+          ],
+          {
+            edgePadding: { top: 80, right: 60, bottom: 240, left: 60 },
+            animated: true,
+          }
+        );
+      } else {
+        mapRef.current?.animateToRegion(
+          {
+            latitude: lab.latitude - 0.001, // Sedikit offset agar tidak tertutup bottom sheet
+            longitude: lab.longitude,
+            latitudeDelta: 0.004,
+            longitudeDelta: 0.004,
+          },
+          600
+        );
+      }
     }
-  }, [viewMode]);
+  }, [userLocation, viewMode]);
 
   const handleNavigateToPresensi = (sessionId: string) => {
     router.push({
@@ -155,7 +179,7 @@ export default function MapsScreen() {
     return getLabActivity(selectedLab.id);
   }, [selectedLab, getLabActivity]);
 
-  const isMapPlatformAvailable = Platform.OS !== 'web';
+  const isMapPlatformAvailable = Platform.OS !== 'web' && isMapKeyConfigured;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -246,6 +270,15 @@ export default function MapsScreen() {
             ) : null}
           </View>
         ) : null}
+
+        {/* Banner Penjelasan bila Google Maps API Key belum disetel */}
+        {!isMapKeyConfigured && Platform.OS !== 'web' ? (
+          <View style={[styles.warningBanner, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', marginTop: 4 }]}>
+            <ThemedText type="small" style={{ color: '#0369A1' }}>
+              ℹ️ Google Maps API Key belum disetel di .env. Menggunakan tampilan daftar lab (SRS-12).
+            </ThemedText>
+          </View>
+        ) : null}
       </View>
 
       {/* Main Content: MapView or Fallback List */}
@@ -281,6 +314,19 @@ export default function MapsScreen() {
 
               {/* Marker Posisi Pengguna Real-time (SRS-09) */}
               {userLocation ? <UserMarker location={userLocation} /> : null}
+
+              {/* Rute Navigasi Visual In-App (Polyline) dari User ke Lab */}
+              {selectedLab && userLocation ? (
+                <Polyline
+                  coordinates={[
+                    { latitude: userLocation.latitude, longitude: userLocation.longitude },
+                    { latitude: selectedLab.latitude, longitude: selectedLab.longitude },
+                  ]}
+                  strokeColor={LaboraColors.primary}
+                  strokeWidth={3}
+                  lineDashPattern={[6, 4]}
+                />
+              ) : null}
             </MapView>
 
             {/* Floating Action Buttons */}
@@ -324,6 +370,29 @@ export default function MapsScreen() {
               >
                 <ThemedText style={styles.fabIcon}>🔄</ThemedText>
               </Pressable>
+
+              {/* Tombol Rute Eksternal Google Maps jika Lab Dipilih */}
+              {selectedLab ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.fab,
+                    { backgroundColor: '#0284C7' },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                  onPress={() => {
+                    const originParam = userLocation
+                      ? `&origin=${userLocation.latitude},${userLocation.longitude}`
+                      : '';
+                    Linking.openURL(
+                      `https://www.google.com/maps/dir/?api=1${originParam}&destination=${selectedLab.latitude},${selectedLab.longitude}&destination_place_id=${encodeURIComponent(
+                        selectedLab.name
+                      )}`
+                    );
+                  }}
+                >
+                  <ThemedText style={[styles.fabIcon, { color: '#FFFFFF' }]}>🧭</ThemedText>
+                </Pressable>
+              ) : null}
             </View>
 
             {/* Bottom Activity Sheet ketika Marker Dipilih (SRS-10) */}

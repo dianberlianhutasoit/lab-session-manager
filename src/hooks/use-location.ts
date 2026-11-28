@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import * as Location from 'expo-location';
-import { Platform } from 'react-native';
+import * as Location from "expo-location";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
 
 export interface UserCoordinates {
   latitude: number;
@@ -21,7 +21,7 @@ export interface UseLocationOptions {
 export interface UseLocationResult {
   location: UserCoordinates | null;
   coords: UserCoordinates | null; // Alias untuk kenyamanan
-  permissionStatus: Location.PermissionStatus | 'undetermined';
+  permissionStatus: Location.PermissionStatus | "undetermined";
   isLoading: boolean;
   error: string | null;
   isWatching: boolean;
@@ -34,7 +34,9 @@ export interface UseLocationResult {
  * Mendukung permintaan izin lokasi, perolehan posisi awal, dan pembaruan real-time (watchPositionAsync)
  * Dilengkapi pembersihan subscription saat unmount untuk efisiensi baterai.
  */
-export function useLocation(options: UseLocationOptions = {}): UseLocationResult {
+export function useLocation(
+  options: UseLocationOptions = {},
+): UseLocationResult {
   const {
     autoWatch = true,
     accuracy = Location.Accuracy.Balanced,
@@ -44,13 +46,15 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
 
   const [location, setLocation] = useState<UserCoordinates | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<
-    Location.PermissionStatus | 'undetermined'
-  >('undetermined');
+    Location.PermissionStatus | "undetermined"
+  >("undetermined");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isWatching, setIsWatching] = useState<boolean>(false);
 
-  const watchSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const watchSubscriptionRef = useRef<Location.LocationSubscription | null>(
+    null,
+  );
   const isMountedRef = useRef<boolean>(true);
 
   // Fungsi untuk meminta izin akses lokasi perangkat
@@ -63,49 +67,54 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
       }
       if (status !== Location.PermissionStatus.GRANTED) {
         if (isMountedRef.current) {
-          setError('Izin akses lokasi ditolak. Silakan izinkan akses lokasi di pengaturan perangkat.');
+          setError(
+            "Izin akses lokasi ditolak. Silakan izinkan akses lokasi di pengaturan perangkat.",
+          );
         }
         return false;
       }
       return true;
     } catch (err: any) {
       if (isMountedRef.current) {
-        setError(err.message || 'Gagal meminta izin lokasi.');
+        setError(err.message || "Gagal meminta izin lokasi.");
       }
       return false;
     }
   }, []);
 
   // Periksa apakah layanan GPS / lokasi aktif
-  const checkServicesAndPermissions = useCallback(async (): Promise<boolean> => {
-    try {
-      if (Platform.OS !== 'web') {
-        const servicesEnabled = await Location.hasServicesEnabledAsync();
-        if (!servicesEnabled) {
-          if (isMountedRef.current) {
-            setError('Layanan lokasi (GPS) nonaktif. Harap aktifkan GPS perangkat Anda.');
+  const checkServicesAndPermissions =
+    useCallback(async (): Promise<boolean> => {
+      try {
+        if (Platform.OS !== "web") {
+          const servicesEnabled = await Location.hasServicesEnabledAsync();
+          if (!servicesEnabled) {
+            if (isMountedRef.current) {
+              setError(
+                "Layanan lokasi (GPS) nonaktif. Harap aktifkan GPS perangkat Anda.",
+              );
+            }
+            return false;
           }
-          return false;
         }
-      }
 
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (isMountedRef.current) {
-        setPermissionStatus(status);
-      }
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (isMountedRef.current) {
+          setPermissionStatus(status);
+        }
 
-      if (status !== Location.PermissionStatus.GRANTED) {
-        return await requestPermission();
-      }
+        if (status !== Location.PermissionStatus.GRANTED) {
+          return await requestPermission();
+        }
 
-      return true;
-    } catch (err: any) {
-      if (isMountedRef.current) {
-        setError(err.message || 'Gagal memeriksa status lokasi.');
+        return true;
+      } catch (err: any) {
+        if (isMountedRef.current) {
+          setError(err.message || "Gagal memeriksa status lokasi.");
+        }
+        return false;
       }
-      return false;
-    }
-  }, [requestPermission]);
+    }, [requestPermission]);
 
   // Fungsi untuk mendapatkan posisi saat ini (one-shot refresh)
   const refreshLocation = useCallback(async () => {
@@ -136,7 +145,7 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
       }
     } catch (err: any) {
       if (isMountedRef.current) {
-        setError(err.message || 'Gagal memperoleh lokasi terkini.');
+        setError(err.message || "Gagal memperoleh lokasi terkini.");
       }
     } finally {
       if (isMountedRef.current) {
@@ -191,14 +200,14 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
                 });
                 setError(null);
               }
-            }
+            },
           );
           watchSubscriptionRef.current = sub;
           if (isMountedRef.current) setIsWatching(true);
         }
       } catch (err: any) {
         if (isMountedRef.current) {
-          setError(err.message || 'Gagal memantau pembaruan lokasi.');
+          setError(err.message || "Gagal memantau pembaruan lokasi.");
           setIsLoading(false);
         }
       }
@@ -213,7 +222,13 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
         watchSubscriptionRef.current = null;
       }
     };
-  }, [autoWatch, accuracy, timeInterval, distanceInterval, checkServicesAndPermissions]);
+  }, [
+    autoWatch,
+    accuracy,
+    timeInterval,
+    distanceInterval,
+    checkServicesAndPermissions,
+  ]);
 
   return {
     location,

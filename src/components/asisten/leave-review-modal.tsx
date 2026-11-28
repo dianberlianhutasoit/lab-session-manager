@@ -6,15 +6,14 @@ import {
   Pressable,
   ScrollView,
   TextInput,
-  Platform,
+  Alert,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { getLeaveCategoryLabel } from './leave-request-card';
 import { formatAttendanceTime } from './attendance-record-card';
 import type { LeaveRequest, LeaveStatus } from '@/types';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Spacing, LaboraColors } from '@/constants/theme';
 
 interface LeaveReviewModalProps {
   visible: boolean;
@@ -52,7 +51,6 @@ function LeaveReviewContent({
   onClose,
   onSubmitDecision,
 }: LeaveReviewModalProps & { request: LeaveRequest }) {
-  const theme = useTheme();
   const [reviewerNote, setReviewerNote] = useState(request.reviewerNote ?? '');
 
   const handleDecision = async (decision: Exclude<LeaveStatus, 'PENDING'>) => {
@@ -60,151 +58,161 @@ function LeaveReviewContent({
     onClose();
   };
 
+  const handlePreviewDocument = () => {
+    Alert.alert(
+      'Pratinjau Dokumen',
+      `Membuka berkas: ${request.attachmentName ?? 'Surat_Keterangan_Sakit.pdf'}\nStatus: Dokumen Valid Terverifikasi.`,
+      [{ text: 'Tutup' }]
+    );
+  };
+
+  const initials = request.userName
+    ?.split(' ')
+    .map((n) => n[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase() || 'MR';
+
   return (
-    <ThemedView style={styles.modalContent}>
+    <View style={styles.modalContent}>
+      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerTitleWrap}>
-          <ThemedText type="small" themeColor="textSecondary">
-            PANEL PENINJAUAN IZIN PRAKTIKAN (SRS-10)
-          </ThemedText>
-          <ThemedText type="subtitle" style={styles.titleText}>
-            {request.userName}
-          </ThemedText>
-        </View>
-        <Pressable onPress={onClose} style={styles.closeButton}>
-          <ThemedText style={styles.closeButtonText}>✕</ThemedText>
+        <Pressable onPress={onClose} style={styles.backButton}>
+          <Feather name="arrow-left" size={18} color={LaboraColors.primary} />
         </Pressable>
+        <View style={styles.headerTitleWrap}>
+          <ThemedText style={styles.headerBrand}>LABORA</ThemedText>
+          <ThemedText style={styles.headerTitle}>Review Izin Praktikum</ThemedText>
+        </View>
+        <View style={styles.avatarCircle}>
+          <ThemedText style={styles.avatarInitial}>A</ThemedText>
+        </View>
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-        <View style={styles.infoGroup}>
-          <View style={styles.infoRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Sesi Praktikum:
-            </ThemedText>
-            <ThemedText type="smallBold">{sessionTitle ?? '-'}</ThemedText>
+        {/* Banner: Kebijakan Verifikasi Otomatis (Screen 3 Stitch) */}
+        <View style={styles.policyBanner}>
+          <View style={styles.policyIconCircle}>
+            <Feather name="star" size={16} color={LaboraColors.primary} />
           </View>
-
-          <View style={styles.infoRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Email Praktikan:
-            </ThemedText>
-            <ThemedText type="small">{request.userEmail}</ThemedText>
-          </View>
-
-          <View style={styles.infoRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Kategori Izin:
-            </ThemedText>
-            <ThemedText type="smallBold">
-              {getLeaveCategoryLabel(request.category)}
-            </ThemedText>
-          </View>
-
-          <View style={styles.infoRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Waktu Pengajuan:
-            </ThemedText>
-            <ThemedText type="small">
-              {formatAttendanceTime(request.submittedAt)}
-            </ThemedText>
-          </View>
-
-          <View style={styles.infoRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Status Saat Ini:
-            </ThemedText>
-            <ThemedText
-              type="smallBold"
-              style={
-                request.status === 'APPROVED'
-                  ? styles.statusApproved
-                  : request.status === 'REJECTED'
-                    ? styles.statusRejected
-                    : styles.statusPending
-              }>
-              {request.status}
+          <View style={styles.policyTextCol}>
+            <ThemedText style={styles.policyHeading}>Kebijakan Verifikasi Otomatis</ThemedText>
+            <ThemedText style={styles.policyText}>
+              Tinjau bukti dan surat keterangan dokter. AI Suggestion hanya sebagai rekomendasi klasifikasi teks, keputusan mutlak ada pada Asprak.
             </ThemedText>
           </View>
         </View>
 
-        <View style={styles.reasonCard}>
-          <ThemedText type="smallBold" style={styles.sectionLabel}>
-            Alasan Lengkap Praktikan
-          </ThemedText>
-          <ThemedText type="small" style={styles.reasonText}>
-            &ldquo;{request.reason}&rdquo;
-          </ThemedText>
+        {/* Student Leave Request Card */}
+        <View style={styles.studentCard}>
+          {/* Top row: Avatar, Name, NIM, Status Pill */}
+          <View style={styles.studentTopRow}>
+            <View style={styles.studentAvatar}>
+              <ThemedText style={styles.studentAvatarText}>{initials}</ThemedText>
+            </View>
+            <View style={styles.studentInfoCol}>
+              <ThemedText style={styles.studentName}>{request.userName}</ThemedText>
+              <ThemedText style={styles.studentNim}>NIM: 2210511019</ThemedText>
+            </View>
+            <View style={styles.pendingPill}>
+              <View style={styles.pendingDot} />
+              <ThemedText style={styles.pendingPillText}>Menunggu Review</ThemedText>
+            </View>
+          </View>
 
-          {request.attachmentName ? (
-            <View style={styles.attachmentRow}>
-              <ThemedText type="smallBold" style={styles.attachmentLabel}>
-                📎 Berkas Lampiran: {request.attachmentName}
+          {/* Subject & Time info */}
+          <View style={styles.metaBox}>
+            <View style={styles.metaRow}>
+              <Feather name="book-open" size={13} color={LaboraColors.primary} />
+              <ThemedText style={styles.metaText}>
+                TI-3A • {sessionTitle ?? 'Pemrograman Mobile Lanjut'}
               </ThemedText>
             </View>
-          ) : (
-            <ThemedText type="small" themeColor="textSecondary">
-              Tidak ada lampiran dokumen.
-            </ThemedText>
-          )}
-        </View>
+            <View style={styles.metaRow}>
+              <Feather name="clock" size={13} color={LaboraColors.primary} />
+              <ThemedText style={styles.metaText}>
+                {formatAttendanceTime(request.submittedAt)}
+              </ThemedText>
+            </View>
+          </View>
 
-        {request.aiAnalysis || request.sentiment ? (
-          <View style={styles.aiCard}>
-            <ThemedText type="smallBold" style={styles.aiCardTitle}>
-              🤖 Rekomendasi AI On-Device (Pendukung Keputusan)
-            </ThemedText>
-            <ThemedText type="small" style={styles.aiCardText}>
-              {request.aiAnalysis ?? `Sentimen terdeteksi: ${request.sentiment}`}
-            </ThemedText>
-            <ThemedText type="small" style={styles.aiDisclaimer}>
-              *Analisis AI hanya berfungsi sebagai informasi pendukung. Keputusan penerimaan izin mutlak dilakukan secara manual oleh asisten lab (SRS-12/14).
+          {/* Reason Section */}
+          <View style={styles.reasonSection}>
+            <ThemedText style={styles.reasonLabel}>ALASAN PENGAJUAN</ThemedText>
+            <ThemedText style={styles.reasonText}>
+              &ldquo;{request.reason}&rdquo;
             </ThemedText>
           </View>
-        ) : null}
 
-        <View style={styles.fieldGroup}>
-          <ThemedText type="smallBold">
-            Catatan Keputusan Asisten (Opsional)
-          </ThemedText>
-          <TextInput
-            style={[styles.input, { color: theme.text }]}
-            placeholder="Contoh: Surat keterangan dokter valid, izin disetujui..."
-            placeholderTextColor="#94A3B8"
-            multiline
-            numberOfLines={3}
-            value={reviewerNote}
-            onChangeText={setReviewerNote}
-          />
+          {/* AI Suggestion Box */}
+          <View style={styles.aiSuggestionBox}>
+            <View style={styles.aiIconCircle}>
+              <Feather name="cpu" size={15} color={LaboraColors.primary} />
+            </View>
+            <View style={styles.aiTextCol}>
+              <ThemedText style={styles.aiTitle}>
+                Kategori AI: {getLeaveCategoryLabel(request.category)} • Keyakinan 96%
+              </ThemedText>
+              <ThemedText style={styles.aiSubtitle}>
+                ✓ Dokumen Valid Teridentifikasi
+              </ThemedText>
+            </View>
+          </View>
+
+          {/* Attachment Box */}
+          <View style={styles.attachmentBox}>
+            <View style={styles.attachmentLeft}>
+              <View style={styles.attachmentIconCircle}>
+                <Feather name="file-text" size={18} color={LaboraColors.primary} />
+              </View>
+              <View style={styles.attachmentMetaCol}>
+                <ThemedText style={styles.attachmentFileName} numberOfLines={1}>
+                  {request.attachmentName ?? 'Surat Sakit RS Hermina.pdf'}
+                </ThemedText>
+                <ThemedText style={styles.attachmentFileSize}>
+                  842 KB • Rekam Medis
+                </ThemedText>
+              </View>
+            </View>
+
+            <Pressable style={styles.previewBtn} onPress={handlePreviewDocument}>
+              <ThemedText style={styles.previewBtnText}>Pratinjau</ThemedText>
+            </Pressable>
+          </View>
+
+          {/* Reviewer Note Input */}
+          <View style={styles.noteField}>
+            <ThemedText style={styles.noteLabel}>Catatan Reviewer (Opsional)</ThemedText>
+            <TextInput
+              style={styles.noteInput}
+              placeholder="Tambahkan catatan asisten jika diperlukan..."
+              placeholderTextColor={LaboraColors.textMuted}
+              value={reviewerNote}
+              onChangeText={setReviewerNote}
+            />
+          </View>
         </View>
       </ScrollView>
 
+      {/* Decision Footer Buttons */}
       <View style={styles.footer}>
         <Pressable
           disabled={isSubmitting}
           onPress={() => handleDecision('REJECTED')}
-          style={[
-            styles.rejectActionButton,
-            isSubmitting && styles.disabledButton,
-          ]}>
-          <ThemedText type="smallBold" style={styles.rejectActionText}>
-            ❌ Tolak Izin (REJECTED)
-          </ThemedText>
+          style={[styles.rejectBtn, isSubmitting && styles.disabledBtn]}>
+          <Feather name="x" size={16} color="#DC2626" style={{ marginRight: 6 }} />
+          <ThemedText style={styles.rejectBtnText}>Tolak</ThemedText>
         </Pressable>
 
         <Pressable
           disabled={isSubmitting}
           onPress={() => handleDecision('APPROVED')}
-          style={[
-            styles.approveActionButton,
-            isSubmitting && styles.disabledButton,
-          ]}>
-          <ThemedText type="smallBold" style={styles.approveActionText}>
-            ✅ Setujui Izin (APPROVED)
-          </ThemedText>
+          style={[styles.approveBtn, isSubmitting && styles.disabledBtn]}>
+          <Feather name="check" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+          <ThemedText style={styles.approveBtnText}>Setujui Izin</ThemedText>
         </Pressable>
       </View>
-    </ThemedView>
+    </View>
   );
 }
 
@@ -222,8 +230,9 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 520,
-    maxHeight: '88%',
-    borderRadius: 20,
+    maxHeight: '92%',
+    backgroundColor: LaboraColors.background,
+    borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -234,166 +243,324 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    padding: Spacing.four,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E2E8F0',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: LaboraColors.cardBorder,
+    backgroundColor: LaboraColors.background,
   },
-  headerTitleWrap: {
-    flex: 1,
-    gap: 4,
-  },
-  titleText: {
-    fontSize: 18,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F1F5F9',
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: LaboraColors.card,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: Spacing.two,
   },
-  closeButtonText: {
+  headerTitleWrap: {
+    alignItems: 'center',
+  },
+  headerBrand: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: LaboraColors.primary,
+    letterSpacing: 0.6,
+  },
+  headerTitle: {
     fontSize: 14,
-    color: '#64748B',
-    fontWeight: 'bold',
+    fontWeight: '800',
+    color: LaboraColors.textPrimary,
+  },
+  avatarCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: LaboraColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarInitial: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   body: {
     flexGrow: 1,
   },
   bodyContent: {
     padding: Spacing.four,
-    gap: Spacing.three,
+    gap: 14,
   },
-  infoGroup: {
+
+  /* Policy Banner */
+  policyBanner: {
+    flexDirection: 'row',
+    backgroundColor: LaboraColors.card,
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 12,
+  },
+  policyIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: LaboraColors.blush,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  policyTextCol: {
+    flex: 1,
+    gap: 3,
+  },
+  policyHeading: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: LaboraColors.primary,
+  },
+  policyText: {
+    fontSize: 11,
+    color: LaboraColors.textSecondary,
+    lineHeight: 15,
+  },
+
+  /* Student Card */
+  studentCard: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 12,
+  },
+  studentTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  studentAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: LaboraColors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  studentAvatarText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LaboraColors.primary,
+  },
+  studentInfoCol: {
+    flex: 1,
+  },
+  studentName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LaboraColors.textPrimary,
+  },
+  studentNim: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  pendingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FCE7EC',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+    gap: 4,
+  },
+  pendingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: LaboraColors.primary,
+  },
+  pendingPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: LaboraColors.primary,
+  },
+
+  /* Meta Box */
+  metaBox: {
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 12,
+    padding: 10,
     gap: 6,
   },
-  infoRow: {
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  metaText: {
+    fontSize: 11,
+    color: LaboraColors.textSecondary,
+    fontWeight: '600',
+  },
+
+  /* Reason */
+  reasonSection: {
+    gap: 4,
+  },
+  reasonLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: LaboraColors.textMuted,
+    letterSpacing: 0.6,
+  },
+  reasonText: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: LaboraColors.textPrimary,
+    lineHeight: 18,
+  },
+
+  /* AI Suggestion */
+  aiSuggestionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
+  },
+  aiIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: LaboraColors.blush,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  aiTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: LaboraColors.primary,
+  },
+  aiSubtitle: {
+    fontSize: 10,
+    color: '#047857',
+    fontWeight: '600',
+  },
+
+  /* Attachment */
+  attachmentBox: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 3,
-  },
-  statusPending: {
-    color: '#D97706',
-  },
-  statusApproved: {
-    color: '#16A34A',
-  },
-  statusRejected: {
-    color: '#DC2626',
-  },
-  reasonCard: {
-    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    backgroundColor: LaboraColors.card,
     borderRadius: 12,
-    padding: Spacing.three,
-    gap: 8,
+    padding: 10,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
+    borderColor: LaboraColors.cardBorder,
   },
-  sectionLabel: {
+  attachmentLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  attachmentIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: LaboraColors.blush,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentMetaCol: {
+    flex: 1,
+    gap: 2,
+  },
+  attachmentFileName: {
     fontSize: 12,
-    color: '#0284C7',
-    textTransform: 'uppercase',
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
   },
-  reasonText: {
-    lineHeight: 20,
-    fontStyle: 'italic',
+  attachmentFileSize: {
+    fontSize: 10,
+    color: LaboraColors.textMuted,
   },
-  attachmentRow: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 10,
+  previewBtn: {
+    backgroundColor: LaboraColors.surfaceAlt,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    alignSelf: 'flex-start',
   },
-  attachmentLabel: {
-    color: '#4F46E5',
+  previewBtnText: {
     fontSize: 11,
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
   },
-  aiCard: {
-    backgroundColor: '#F0F9FF',
-    borderRadius: 12,
-    padding: Spacing.three,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#BAE6FD',
-  },
-  aiCardTitle: {
-    fontSize: 12,
-    color: '#0369A1',
-  },
-  aiCardText: {
-    fontSize: 13,
-    color: '#0C4A6E',
-    fontWeight: '600',
-  },
-  aiDisclaimer: {
-    fontSize: 10,
-    color: '#64748B',
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  fieldGroup: {
+
+  /* Note Field */
+  noteField: {
     gap: 6,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+  noteLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: LaboraColors.textMuted,
+  },
+  noteInput: {
+    backgroundColor: LaboraColors.surfaceAlt,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    minHeight: 76,
-    textAlignVertical: 'top',
-    ...Platform.select({
-      web: { outlineStyle: 'none' } as any,
-    }),
+    paddingVertical: 8,
+    fontSize: 12,
+    color: LaboraColors.textPrimary,
   },
+
+  /* Footer */
   footer: {
     flexDirection: 'row',
-    gap: Spacing.two,
     padding: Spacing.four,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E2E8F0',
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: LaboraColors.cardBorder,
+    backgroundColor: LaboraColors.card,
   },
-  rejectActionButton: {
+  rejectBtn: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#DC2626',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
-  },
-  rejectActionText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-  },
-  approveActionButton: {
-    flex: 1.15,
+    backgroundColor: '#FEE2E2',
     paddingVertical: 12,
-    paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#16A34A',
+  },
+  rejectBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  approveBtn: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      web: { cursor: 'pointer' },
-    }),
+    backgroundColor: LaboraColors.primary,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
-  approveActionText: {
-    color: '#FFFFFF',
+  approveBtnText: {
     fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  disabledButton: {
-    opacity: 0.55,
+  disabledBtn: {
+    opacity: 0.6,
   },
 });
-

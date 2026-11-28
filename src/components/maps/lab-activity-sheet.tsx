@@ -4,12 +4,15 @@ import {
   StyleSheet,
   Pressable,
   Platform,
+  Linking,
+  Alert,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import type { Lab, Schedule, Session, User } from '@/types';
 import type { UserCoordinates } from '@/hooks/use-location';
-import { Spacing } from '@/constants/theme';
+import { Spacing, LaboraColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/context/auth-context';
 
@@ -75,9 +78,34 @@ export function LabActivitySheet({
 
   const isWithinRadius = distance !== null ? distance <= lab.radius : null;
 
+  const walkMinutes = distance !== null ? Math.max(1, Math.ceil(distance / 75)) : null;
+  const formattedDistance = distance !== null
+    ? distance >= 1000
+      ? `${(distance / 1000).toFixed(1)} km`
+      : `${distance} m`
+    : null;
+
   const ongoingAssistant = activity.ongoing
     ? assistants.find((a) => a.id === activity.ongoing?.session.assistantId)
     : null;
+
+  // Buka rute turn-by-turn di aplikasi Google Maps eksternal
+  const handleOpenGoogleMapsRoute = () => {
+    const originParam = userLocation
+      ? `&origin=${userLocation.latitude},${userLocation.longitude}`
+      : '';
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1${originParam}&destination=${lab.latitude},${lab.longitude}&destination_place_id=${encodeURIComponent(
+      lab.name
+    )}`;
+
+    Linking.openURL(mapsUrl).catch(() => {
+      Alert.alert(
+        'Buka Google Maps',
+        `Menampilkan koordinat Lab: ${lab.latitude}, ${lab.longitude}`,
+        [{ text: 'OK' }]
+      );
+    });
+  };
 
   return (
     <ThemedView
@@ -115,6 +143,33 @@ export function LabActivitySheet({
         </Pressable>
       </View>
 
+      {/* Route & Distance Guidance Card (SRS-03, SRS-10) */}
+      {distance !== null ? (
+        <View style={styles.routeSummaryCard}>
+          <View style={styles.routeMetricsRow}>
+            <View style={styles.routeMetricItem}>
+              <Feather name="navigation" size={14} color={LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Jarak Tempuh</ThemedText>
+              <ThemedText style={styles.routeMetricValue}>{formattedDistance}</ThemedText>
+            </View>
+            <View style={styles.routeMetricDivider} />
+            <View style={styles.routeMetricItem}>
+              <Feather name="clock" size={14} color={LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Estimasi Jalan</ThemedText>
+              <ThemedText style={styles.routeMetricValue}>~{walkMinutes} mnt</ThemedText>
+            </View>
+            <View style={styles.routeMetricDivider} />
+            <View style={styles.routeMetricItem}>
+              <Feather name="shield" size={14} color={isWithinRadius ? '#15803D' : LaboraColors.primary} />
+              <ThemedText style={styles.routeMetricLabel}>Geofence</ThemedText>
+              <ThemedText style={[styles.routeMetricValue, { color: isWithinRadius ? '#15803D' : '#B45309' }]}>
+                {isWithinRadius ? 'Dalam Lab' : 'Luar Radius'}
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       {/* Info Status Jarak (SRS-03 & SRS-10) */}
       {distance !== null ? (
         <View
@@ -133,6 +188,19 @@ export function LabActivitySheet({
           </ThemedText>
         </View>
       ) : null}
+
+      {/* Navigation Buttons: Buka Rute Google Maps */}
+      <View style={styles.routeActionRow}>
+        <Pressable
+          style={styles.openMapsBtn}
+          onPress={handleOpenGoogleMapsRoute}
+        >
+          <Feather name="navigation" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+          <ThemedText style={styles.openMapsBtnText}>
+            Lihat Rute ke Lab di Google Maps
+          </ThemedText>
+        </Pressable>
+      </View>
 
       {/* Sesi Berlangsung (Ongoing Activity) */}
       <View style={styles.section}>
@@ -420,5 +488,55 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     alignItems: 'center',
+  },
+  routeSummaryCard: {
+    backgroundColor: '#FAF5F7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F0E2E7',
+    padding: 10,
+    marginBottom: 8,
+  },
+  routeMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  routeMetricItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeMetricLabel: {
+    fontSize: 10,
+    color: LaboraColors.textSecondary,
+    marginTop: 2,
+  },
+  routeMetricValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LaboraColors.textPrimary,
+    marginTop: 1,
+  },
+  routeMetricDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E5D6DC',
+  },
+  routeActionRow: {
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  openMapsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LaboraColors.primary,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  openMapsBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

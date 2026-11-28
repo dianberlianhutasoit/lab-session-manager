@@ -5,6 +5,7 @@ import {
   ScrollView,
   Pressable,
   TextInput,
+  Linking,
 } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -188,6 +189,22 @@ export function MapFallbackList({
                       📏 {distance}m {distance <= lab.radius ? '(Dalam Radius)' : ''}
                     </ThemedText>
                   ) : null}
+
+                  <Pressable
+                    style={styles.directRouteBtn}
+                    onPress={() => {
+                      const originParam = userLocation
+                        ? `&origin=${userLocation.latitude},${userLocation.longitude}`
+                        : '';
+                      Linking.openURL(
+                        `https://www.google.com/maps/dir/?api=1${originParam}&destination=${lab.latitude},${lab.longitude}&destination_place_id=${encodeURIComponent(
+                          lab.name
+                        )}`
+                      );
+                    }}
+                  >
+                    <ThemedText style={styles.directRouteBtnText}>🧭 Buka Rute</ThemedText>
+                  </Pressable>
                 </View>
               </Pressable>
             );
@@ -329,5 +346,16 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: 12,
     textAlign: 'center',
+  },
+  directRouteBtn: {
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  directRouteBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

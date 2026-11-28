@@ -15,13 +15,15 @@ import type { Schedule, Session } from "@/types";
 import SessionCard from "@/components/praktikan/SessionCard";
 import { useSessionContext } from "@/context/session-context";
 import { useAuth } from "@/context/auth-context";
-import { MemphisColors } from "@/constants/theme";
+import { LaboraColors, Spacing, MaxContentWidth } from "@/constants/theme";
+import { LaboraTopBar } from "@/components/labora/LaboraTopBar";
+import { CircularGauge } from "@/components/labora/CircularGauge";
 
 type ScheduledSession = { session: Session; schedule: Schedule };
 
 export default function PraktikanJadwalScreen() {
   const router = useRouter();
-  const { schedules, sessions, attendance, permissions, loading, error } =
+  const { schedules, sessions, attendance, permissions, loading, error, isFirestoreConnected } =
     useSessionContext();
   const { profile, logout } = useAuth();
 
@@ -50,21 +52,15 @@ export default function PraktikanJadwalScreen() {
     return permissions.filter((p) => p.userId === profile.id).length;
   }, [permissions, profile]);
 
+  const totalSessionsCount = scheduledSessions.length;
+  const attendedCount = myAttendanceCount;
+  const alpaCount = Math.max(0, totalSessionsCount - (attendedCount + myPermissionsCount));
+
   const attendanceRate = useMemo(() => {
-    if (scheduledSessions.length === 0) return 100;
-    const rate = Math.round((myAttendanceCount / scheduledSessions.length) * 100);
+    if (totalSessionsCount === 0) return attendedCount > 0 ? 100 : 0;
+    const rate = Math.round(((attendedCount + myPermissionsCount) / totalSessionsCount) * 1000) / 10;
     return Math.min(100, Math.max(0, rate));
-  }, [myAttendanceCount, scheduledSessions.length]);
-
-  const initial = profile?.name?.trim().charAt(0).toUpperCase() || "M";
-
-  const handleNotificationPress = () => {
-    Alert.alert(
-      "Notifikasi Praktikum",
-      "Tidak ada pengumuman mendesak baru hari ini. Pastikan hadir tepat waktu sebelum sesi dibuka.",
-      [{ text: "Mengerti" }]
-    );
-  };
+  }, [attendedCount, myPermissionsCount, totalSessionsCount]);
 
   const handleQuickPresensi = () => {
     if (nextSession) {
@@ -72,6 +68,22 @@ export default function PraktikanJadwalScreen() {
     } else {
       Alert.alert("Presensi Lab", "Belum ada sesi praktikum yang tersedia.");
     }
+  };
+
+  const handleDownloadModule = () => {
+    Alert.alert(
+      "Modul Praktikum",
+      "Modul praktikum pertemuan aktif telah disiapkan oleh Asisten Lab. Anda dapat mengunduh berkas PDF melalui portal SSO Mahasiswa.",
+      [{ text: "Tutup" }]
+    );
+  };
+
+  const handleContactAssistant = () => {
+    Alert.alert(
+      "Hubungi Asisten Lab",
+      "Kirim pesan atau koordinasi kehadiran langsung melalui asisten lab yang bertugas pada sesi ini.",
+      [{ text: "Mengerti" }]
+    );
   };
 
   return (
@@ -87,221 +99,202 @@ export default function PraktikanJadwalScreen() {
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <View style={styles.headerBlock}>
-              {/* 1. Top Profile Bar (sesuai Mockup Kiri) */}
-              <View style={styles.topProfileBar}>
-                <View style={styles.profileLeft}>
-                  <View style={styles.avatarCircle}>
-                    <Text style={styles.avatarInitial}>{initial}</Text>
-                  </View>
-                  <View style={styles.greetingCol}>
-                    <Text style={styles.greetingText}>Good Morning,</Text>
-                    <Text style={styles.userName} numberOfLines={1}>
-                      {profile?.name ?? "Sara Wilson"}
-                    </Text>
-                  </View>
-                </View>
+              {/* 1. Google Stitch LABORA TopBar */}
+              <LaboraTopBar
+                title="Beranda"
+                subtitle="Informatika"
+                roleBadge="⇄ Praktikan"
+                userName={profile?.name || "Mahasiswa"}
+                isOnline={isFirestoreConnected}
+                onRoleBadgePress={() => router.push("/(main)" as any)}
+                onProfilePress={() => void logout()}
+              />
 
-                <View style={styles.profileRight}>
-                  {/* Notification Bell with Badge */}
-                  <TouchableOpacity
-                    style={styles.bellButton}
-                    onPress={handleNotificationPress}
-                    activeOpacity={0.8}
-                  >
-                    <Feather name="bell" size={20} color={MemphisColors.navy} />
-                    <View style={styles.bellBadgeDot} />
-                  </TouchableOpacity>
-
-                  {/* Minimal Logout Button */}
-                  <TouchableOpacity
-                    style={styles.logoutIconButton}
-                    onPress={() => void logout()}
-                    activeOpacity={0.8}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Feather name="log-out" size={18} color={MemphisColors.error} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* 2. Hero Card: "Your Next Appointment" -> "Sesi Praktikum Berikutnya" */}
+              {/* 2. Hero Card: "SESI SEDANG BERLANGSUNG" (Screen 5 Google Stitch) */}
               <View style={styles.heroCard}>
-                <View style={styles.heroLeft}>
-                  <Text style={styles.heroSubtitle}>SESI PRAKTIKUM BERIKUTNYA</Text>
-                  {nextSession ? (
-                    <>
-                      <Text style={styles.heroDateNumber}>
-                        {nextSession.schedule.date.slice(0, 2) || "08"}
-                      </Text>
-                      <Text style={styles.heroDateSub}>
-                        {nextSession.schedule.date} · {nextSession.schedule.startTime} WIB
-                      </Text>
-                      <Text style={styles.heroCourseTitle} numberOfLines={1}>
-                        {nextSession.schedule.title}
-                      </Text>
-                      <View style={styles.heroBadgeRow}>
-                        <View
-                          style={[
-                            styles.heroStatusBadge,
-                            nextSession.session.status === "OPEN"
-                              ? styles.heroStatusOpen
-                              : styles.heroStatusClosed,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.heroStatusText,
-                              nextSession.session.status === "OPEN"
-                                ? styles.heroStatusOpenText
-                                : styles.heroStatusClosedText,
-                            ]}
-                          >
-                            {nextSession.session.status === "OPEN"
-                              ? "SEDANG DIBUKA"
-                              : "TERJADWAL"}
-                          </Text>
-                        </View>
-                        <Text style={styles.heroRoomText}>
-                          📍 {nextSession.schedule.room}
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.heroEmptyText}>
-                      Semua sesi praktikum telah selesai atau belum dimulai.
+                {/* Status pill & remaining timer */}
+                <View style={styles.heroTopRow}>
+                  <View style={styles.heroStatusPill}>
+                    <View style={styles.heroStatusDot} />
+                    <Text style={styles.heroStatusPillText}>SESI SEDANG BERLANGSUNG</Text>
+                  </View>
+                  <View style={styles.heroTimerRow}>
+                    <Feather name="clock" size={12} color={LaboraColors.primary} />
+                    <Text style={styles.heroTimerText}>Sisa 48 mnt</Text>
+                  </View>
+                </View>
+
+                {/* Course Title */}
+                <Text style={styles.heroCourseTitle}>
+                  {nextSession?.schedule.title ?? "Praktikum Jaringan Komputer Lanjut"}
+                </Text>
+
+                {/* Date & Room */}
+                <View style={styles.heroDetailRow}>
+                  <Feather name="calendar" size={13} color={LaboraColors.textSecondary} />
+                  <Text style={styles.heroDetailText}>
+                    Hari ini, {nextSession?.schedule.startTime ?? "09:30"} - {nextSession?.schedule.endTime ?? "12:00"} WIB
+                  </Text>
+                </View>
+
+                <View style={styles.heroDetailRow}>
+                  <Feather name="map-pin" size={13} color={LaboraColors.textSecondary} />
+                  <Text style={styles.heroDetailText}>
+                    {nextSession?.schedule.room ?? "Lab Cyber & Jaringan Lt. 3"}
+                  </Text>
+                </View>
+
+                {/* Geofence Detection Card inside Hero */}
+                <View style={styles.geofenceNoticeBox}>
+                  <View style={styles.geofenceIconCircle}>
+                    <Ionicons name="radio-outline" size={16} color={LaboraColors.primary} />
+                  </View>
+                  <View style={styles.geofenceNoticeContent}>
+                    <View style={styles.geofenceNoticeTitleRow}>
+                      <Text style={styles.geofenceNoticeTitle}>GPS Geofence Terdeteksi</Text>
+                      <Feather name="check-circle" size={12} color="#059669" style={{ marginLeft: 4 }} />
+                    </View>
+                    <Text style={styles.geofenceNoticeSubtitle}>
+                      Anda berada dalam jangkauan Lab <Text style={styles.boldText}>(12 meter)</Text>
                     </Text>
-                  )}
-                </View>
-
-                <View style={styles.heroRight}>
-                  {/* Technology / Stethoscope Illustration Icon */}
-                  <View style={styles.heroGraphicCircle}>
-                    <Ionicons name="hardware-chip-outline" size={42} color="#93C5FD" />
                   </View>
                 </View>
+
+                {/* Big Action Button */}
+                <TouchableOpacity
+                  style={styles.presensiNowBtn}
+                  onPress={handleQuickPresensi}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="finger-print-outline" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.presensiNowBtnText}>Lakukan Presensi GPS Sekarang</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* 3. Overview Card: "Health Overview" -> "Ringkasan Kehadiran" */}
-              <View style={styles.overviewCard}>
+              {/* 3. Section: Ringkasan Kehadiran (Screen 5 Google Stitch) */}
+              <View style={styles.overviewSection}>
                 <View style={styles.overviewHeader}>
-                  <Text style={styles.overviewTitle}>Ringkasan Kehadiran</Text>
-                  <View style={styles.dropdownPill}>
-                    <Text style={styles.dropdownPillText}>Semester Ini ⌄</Text>
-                  </View>
+                  <Text style={styles.sectionHeading}>Ringkasan Kehadiran</Text>
+                  <Text style={styles.semesterText}>Semester Ganjil 2024/2025</Text>
                 </View>
 
-                <View style={styles.metricsRow}>
-                  {/* Metric 1 */}
-                  <View style={styles.metricCol}>
-                    <Text style={styles.metricLabel}>Sesi Diikuti</Text>
-                    <View style={styles.metricValueRow}>
-                      <Text style={styles.metricNumber}>{scheduledSessions.length}</Text>
-                      <Text style={styles.metricUnit}>sesi</Text>
+                <View style={styles.overviewCard}>
+                  {/* Gauge & Main Rate Row */}
+                  <View style={styles.gaugeRow}>
+                    <View style={styles.gaugeInfoCol}>
+                      <Text style={styles.gaugeSubtitle}>TINGKAT KEHADIRAN</Text>
+                      <View style={styles.gaugeRateRow}>
+                        <Text style={styles.gaugeRateNumber}>{attendanceRate}%</Text>
+                        <Text style={styles.gaugeRateLabel}>Sangat Baik</Text>
+                      </View>
+                      <Text style={styles.gaugeSessionsInfo}>
+                        {attendedCount} dari {totalSessionsCount} total sesi lab telah selesai
+                      </Text>
                     </View>
-                    <Feather
-                      name="calendar"
-                      size={14}
-                      color={MemphisColors.teal}
-                      style={styles.metricIcon}
-                    />
+
+                    <View style={styles.gaugeWrapper}>
+                      <CircularGauge
+                        percentage={attendanceRate}
+                        size={110}
+                        strokeWidth={10}
+                        color={LaboraColors.primary}
+                        trackColor="#F3E8EC"
+                        centerIcon="checkmark"
+                      />
+                    </View>
                   </View>
 
-                  <View style={styles.metricDivider} />
-
-                  {/* Metric 2 */}
-                  <View style={styles.metricCol}>
-                    <Text style={styles.metricLabel}>Tingkat Hadir</Text>
-                    <View style={styles.metricValueRow}>
-                      <Text style={styles.metricNumber}>{attendanceRate}%</Text>
-                      <Text style={styles.metricUnit}>hadir</Text>
+                  {/* 2-column stats breakdown */}
+                  <View style={styles.statsTwoColRow}>
+                    <View style={styles.statBreakdownBox}>
+                      <View style={styles.statBreakdownHeader}>
+                        <Text style={styles.statBreakdownLabel}>Hadir Lengkap</Text>
+                        <Feather name="check-square" size={14} color={LaboraColors.primary} />
+                      </View>
+                      <Text style={styles.statBreakdownValue}>{attendedCount} / {totalSessionsCount}</Text>
+                      <Text style={styles.statBreakdownSub}>Sesi Terpenuhi</Text>
                     </View>
-                    <Feather
-                      name="check-circle"
-                      size={14}
-                      color="#10B981"
-                      style={styles.metricIcon}
-                    />
+
+                    <View style={styles.statBreakdownBox}>
+                      <View style={styles.statBreakdownHeader}>
+                        <Text style={styles.statBreakdownLabel}>Izin / Dispensasi</Text>
+                        <Feather name="folder" size={14} color="#D97706" />
+                      </View>
+                      <Text style={styles.statBreakdownValue}>
+                        {myPermissionsCount} Sesi
+                      </Text>
+                      <Text style={styles.statBreakdownSub}>
+                        {myPermissionsCount > 0 ? "Pengajuan Tercatat" : "Tidak Ada Izin"}
+                      </Text>
+                    </View>
                   </View>
 
-                  <View style={styles.metricDivider} />
-
-                  {/* Metric 3 */}
-                  <View style={styles.metricCol}>
-                    <Text style={styles.metricLabel}>Izin / Sakit</Text>
-                    <View style={styles.metricValueRow}>
-                      <Text style={styles.metricNumber}>{myPermissionsCount}</Text>
-                      <Text style={styles.metricUnit}>izin</Text>
+                  {/* 3rd row: Alpa */}
+                  <View style={styles.statAlpaBox}>
+                    <View style={styles.statAlpaLeft}>
+                      <View style={styles.statAlpaIconCircle}>
+                        <Feather name="x-circle" size={14} color={LaboraColors.primary} />
+                      </View>
+                      <View>
+                        <Text style={styles.statAlpaTitle}>Alpa / Tanpa Keterangan</Text>
+                        <Text style={styles.statAlpaSub}>{alpaCount} Sesi</Text>
+                      </View>
                     </View>
-                    <Feather
-                      name="file-text"
-                      size={14}
-                      color="#F59E0B"
-                      style={styles.metricIcon}
-                    />
+                    <Text style={styles.statAlpaRate}>
+                      {totalSessionsCount > 0 ? ((alpaCount / totalSessionsCount) * 100).toFixed(1) : "0.0"}%
+                    </Text>
                   </View>
                 </View>
               </View>
 
-              {/* 4. Quick Access Row (sesuai Mockup Kiri) */}
-              <View style={styles.quickAccessSection}>
-                <Text style={styles.quickAccessHeading}>Quick Access</Text>
-                <View style={styles.quickAccessRow}>
-                  {/* Quick Action 1: Presensi Lab */}
+              {/* 4. Section: Aksi Cepat (Screen 5 Google Stitch) */}
+              <View style={styles.quickActionSection}>
+                <Text style={styles.sectionHeading}>Aksi Cepat</Text>
+                <View style={styles.quickActionRow}>
                   <TouchableOpacity
-                    style={styles.quickActionItem}
-                    onPress={handleQuickPresensi}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.quickActionCircle, styles.quickActionCircleActive]}>
-                      <Feather name="user-check" size={20} color={MemphisColors.teal} />
-                    </View>
-                    <Text style={styles.quickActionLabel}>Presensi</Text>
-                  </TouchableOpacity>
-
-                  {/* Quick Action 2: Ajukan Izin */}
-                  <TouchableOpacity
-                    style={styles.quickActionItem}
+                    style={styles.quickActionCard}
                     onPress={() => router.push("/praktikan/izin" as Href)}
                     activeOpacity={0.8}
                   >
-                    <View style={styles.quickActionCircle}>
-                      <Feather name="file-text" size={20} color={MemphisColors.slate} />
+                    <View style={styles.quickActionIconCircle}>
+                      <Feather name="clipboard" size={18} color={LaboraColors.primary} />
                     </View>
-                    <Text style={styles.quickActionLabel}>Ajukan Izin</Text>
+                    <Text style={styles.quickActionCardLabel}>Ajukan Izin Praktikum</Text>
                   </TouchableOpacity>
 
-                  {/* Quick Action 3: Riwayat */}
                   <TouchableOpacity
-                    style={styles.quickActionItem}
-                    onPress={() => router.push("/praktikan/riwayat" as Href)}
+                    style={styles.quickActionCard}
+                    onPress={handleDownloadModule}
                     activeOpacity={0.8}
                   >
-                    <View style={styles.quickActionCircle}>
-                      <Feather name="clock" size={20} color={MemphisColors.slate} />
+                    <View style={styles.quickActionIconCircle}>
+                      <Feather name="download" size={18} color={LaboraColors.primary} />
                     </View>
-                    <Text style={styles.quickActionLabel}>Riwayat</Text>
+                    <Text style={styles.quickActionCardLabel}>Unduh Modul Praktikum</Text>
                   </TouchableOpacity>
 
-                  {/* Quick Action 4: Peta Lab */}
                   <TouchableOpacity
-                    style={styles.quickActionItem}
-                    onPress={() => router.push("/maps" as Href)}
+                    style={styles.quickActionCard}
+                    onPress={handleContactAssistant}
                     activeOpacity={0.8}
                   >
-                    <View style={styles.quickActionCircle}>
-                      <Feather name="map-pin" size={20} color={MemphisColors.slate} />
+                    <View style={styles.quickActionIconCircle}>
+                      <Feather name="message-square" size={18} color={LaboraColors.primary} />
                     </View>
-                    <Text style={styles.quickActionLabel}>Peta Lab</Text>
+                    <Text style={styles.quickActionCardLabel}>Hubungi Asprak Sesi</Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Section Header untuk List Jadwal */}
-              <View style={styles.scheduleListHeader}>
-                <Text style={styles.scheduleListTitle}>Jadwal Praktikum Anda</Text>
-                <Text style={styles.scheduleListCount}>
-                  ({scheduledSessions.length} Sesi)
-                </Text>
+              {/* 5. Section: Jadwal Pekan Ini Header */}
+              <View style={styles.scheduleHeaderRow}>
+                <Text style={styles.sectionHeading}>Jadwal Pekan Ini</Text>
+                <TouchableOpacity
+                  onPress={() => router.push("/praktikan/riwayat" as Href)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.seeCalendarText}>Lihat Kalender ›</Text>
+                </TouchableOpacity>
               </View>
             </View>
           }
@@ -314,7 +307,7 @@ export default function PraktikanJadwalScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Feather name="calendar" size={36} color={MemphisColors.muted} style={{ marginBottom: 10 }} />
+              <Feather name="calendar" size={36} color={LaboraColors.textMuted} style={{ marginBottom: 10 }} />
               <Text style={styles.emptyText}>
                 {loading
                   ? "Memuat jadwal praktikum…"
@@ -331,345 +324,344 @@ export default function PraktikanJadwalScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: LaboraColors.background,
   },
   container: {
     flex: 1,
-    backgroundColor: MemphisColors.surface,
+    backgroundColor: LaboraColors.background,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.four,
     paddingTop: 12,
     paddingBottom: 40,
+    maxWidth: MaxContentWidth,
+    alignSelf: "center",
+    width: "100%",
   },
   headerBlock: {
     marginBottom: 8,
+    gap: 16,
   },
-  topProfileBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-    paddingTop: 8,
-  },
-  profileLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#DBEAFE",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-    shadowColor: "#0B192C",
-    shadowOffset: { width: 0, height: 2 },
+
+  /* Hero Card */
+  heroCard: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    shadowColor: LaboraColors.primary,
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  avatarInitial: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: MemphisColors.teal,
-  },
-  greetingCol: {
-    justifyContent: "center",
-  },
-  greetingText: {
-    fontSize: 13,
-    color: MemphisColors.muted,
-    fontWeight: "500",
-  },
-  userName: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: MemphisColors.navy,
-  },
-  profileRight: {
-    flexDirection: "row",
-    alignItems: "center",
+    shadowRadius: 12,
+    elevation: 3,
     gap: 10,
   },
-  bellButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: MemphisColors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    shadowColor: "#0B192C",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  bellBadgeDot: {
-    position: "absolute",
-    top: 10,
-    right: 11,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#EF4444",
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
-  },
-  logoutIconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: "#FEE2E2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroCard: {
-    backgroundColor: MemphisColors.navy,
-    borderRadius: 24,
-    padding: 22,
+  heroTopRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
-    shadowColor: MemphisColors.navy,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 6,
+    alignItems: "center",
   },
-  heroLeft: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  heroSubtitle: {
-    color: "#93C5FD",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    marginBottom: 4,
-  },
-  heroDateNumber: {
-    color: "#FFFFFF",
-    fontSize: 40,
-    fontWeight: "800",
-    lineHeight: 44,
-  },
-  heroDateSub: {
-    color: "#E2E8F0",
-    fontSize: 13,
-    fontWeight: "500",
-    marginBottom: 6,
-  },
-  heroCourseTitle: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  heroBadgeRow: {
+  heroStatusPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  heroStatusBadge: {
+    backgroundColor: LaboraColors.blush,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 9999,
+    gap: 5,
   },
-  heroStatusOpen: {
-    backgroundColor: "rgba(16, 185, 129, 0.2)",
+  heroStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: LaboraColors.primary,
   },
-  heroStatusOpenText: {
-    color: "#34D399",
+  heroStatusPillText: {
     fontSize: 10,
     fontWeight: "800",
+    color: LaboraColors.primary,
+    letterSpacing: 0.5,
   },
-  heroStatusClosed: {
-    backgroundColor: "rgba(148, 163, 184, 0.2)",
+  heroTimerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  heroStatusClosedText: {
-    color: "#CBD5E1",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  heroStatusText: {
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  heroRoomText: {
-    color: "#93C5FD",
-    fontSize: 12,
+  heroTimerText: {
+    fontSize: 11,
     fontWeight: "600",
+    color: LaboraColors.textSecondary,
   },
-  heroEmptyText: {
-    color: "#94A3B8",
-    fontSize: 13,
+  heroCourseTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: LaboraColors.textPrimary,
+  },
+  heroDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  heroDetailText: {
+    fontSize: 12,
+    color: LaboraColors.textSecondary,
+  },
+
+  /* Geofence notice box */
+  geofenceNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: LaboraColors.blush,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
+    marginTop: 4,
+  },
+  geofenceIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FCE7EC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  geofenceNoticeContent: {
+    flex: 1,
+    gap: 2,
+  },
+  geofenceNoticeTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  geofenceNoticeTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: LaboraColors.primary,
+  },
+  geofenceNoticeSubtitle: {
+    fontSize: 11,
+    color: LaboraColors.textSecondary,
+  },
+  boldText: {
+    fontWeight: "700",
+    color: LaboraColors.textPrimary,
+  },
+
+  /* Presensi Now Button */
+  presensiNowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: LaboraColors.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
     marginTop: 6,
+    shadowColor: LaboraColors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  heroRight: {
-    alignItems: "center",
-    justifyContent: "center",
+  presensiNowBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
-  heroGraphicCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  overviewCard: {
-    backgroundColor: MemphisColors.mintSurface,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
-    padding: 18,
-    marginBottom: 20,
+
+  /* Overview Section */
+  overviewSection: {
+    gap: 10,
   },
   overviewHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
   },
-  overviewTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: MemphisColors.navy,
-  },
-  dropdownPill: {
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
-  },
-  dropdownPillText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: MemphisColors.teal,
-  },
-  metricsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  metricCol: {
-    flex: 1,
-    alignItems: "center",
-  },
-  metricDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: "#DBEAFE",
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: MemphisColors.muted,
-    fontWeight: "500",
-    marginBottom: 4,
-  },
-  metricValueRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 3,
-    marginBottom: 4,
-  },
-  metricNumber: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: MemphisColors.navy,
-  },
-  metricUnit: {
-    fontSize: 11,
-    color: MemphisColors.muted,
-    fontWeight: "600",
-  },
-  metricIcon: {
-    marginTop: 2,
-  },
-  quickAccessSection: {
-    marginBottom: 20,
-  },
-  quickAccessHeading: {
+  sectionHeading: {
     fontSize: 16,
     fontWeight: "800",
-    color: MemphisColors.navy,
-    marginBottom: 14,
+    color: LaboraColors.textPrimary,
   },
-  quickAccessRow: {
+  semesterText: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+  },
+  overviewCard: {
+    backgroundColor: LaboraColors.card,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    gap: 14,
+  },
+  gaugeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  quickActionItem: {
-    alignItems: "center",
-    width: 72,
+  gaugeInfoCol: {
+    flex: 1,
+    gap: 4,
   },
-  quickActionCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: MemphisColors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-    shadowColor: "#0B192C",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
+  gaugeSubtitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: LaboraColors.textMuted,
+    letterSpacing: 0.6,
   },
-  quickActionCircleActive: {
-    backgroundColor: MemphisColors.blueActiveCircle,
-    borderColor: "#BFDBFE",
-  },
-  quickActionLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: MemphisColors.slate,
-    textAlign: "center",
-  },
-  scheduleListHeader: {
+  gaugeRateRow: {
     flexDirection: "row",
     alignItems: "baseline",
     gap: 6,
-    marginBottom: 12,
-    paddingTop: 4,
   },
-  scheduleListTitle: {
+  gaugeRateNumber: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: LaboraColors.textPrimary,
+  },
+  gaugeRateLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: LaboraColors.primary,
+  },
+  gaugeSessionsInfo: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+    lineHeight: 15,
+  },
+  gaugeWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 10,
+  },
+
+  /* Two Col Stats */
+  statsTwoColRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  statBreakdownBox: {
+    flex: 1,
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 14,
+    padding: 12,
+    gap: 4,
+  },
+  statBreakdownHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  statBreakdownLabel: {
+    fontSize: 11,
+    color: LaboraColors.textMuted,
+    fontWeight: "600",
+  },
+  statBreakdownValue: {
     fontSize: 16,
     fontWeight: "800",
-    color: MemphisColors.navy,
+    color: LaboraColors.textPrimary,
   },
-  scheduleListCount: {
+  statBreakdownSub: {
+    fontSize: 10,
+    color: LaboraColors.textSecondary,
+  },
+
+  /* Alpa Box */
+  statAlpaBox: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: LaboraColors.surfaceAlt,
+    borderRadius: 14,
+    padding: 12,
+  },
+  statAlpaLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  statAlpaIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: LaboraColors.blush,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statAlpaTitle: {
     fontSize: 12,
-    fontWeight: "600",
-    color: MemphisColors.muted,
+    fontWeight: "700",
+    color: LaboraColors.textPrimary,
   },
+  statAlpaSub: {
+    fontSize: 10,
+    color: LaboraColors.textMuted,
+  },
+  statAlpaRate: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: LaboraColors.primary,
+  },
+
+  /* Quick Action Row */
+  quickActionSection: {
+    gap: 10,
+  },
+  quickActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quickActionCard: {
+    flex: 1,
+    backgroundColor: LaboraColors.card,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: LaboraColors.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  quickActionIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: LaboraColors.blush,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickActionCardLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: LaboraColors.textPrimary,
+    textAlign: "center",
+    lineHeight: 13,
+  },
+
+  /* Schedule Header */
+  scheduleHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  seeCalendarText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: LaboraColors.primary,
+  },
+
+  /* Empty state */
   emptyContainer: {
     padding: 36,
     alignItems: "center",
     justifyContent: "center",
   },
   emptyText: {
-    color: MemphisColors.muted,
-    fontSize: 14,
+    color: LaboraColors.textMuted,
+    fontSize: 13,
     textAlign: "center",
   },
 });
