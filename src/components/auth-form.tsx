@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -13,9 +14,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth, toAuthMessage } from '@/context/auth-context';
 import { LaboraColors } from '@/constants/theme';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Responsive scaler based on Figma iPhone width (402px)
+const SCALE = Math.min(Math.max(SCREEN_WIDTH / 402, 0.85), 1.25);
+const s = (val: number) => Math.round(val * SCALE);
+
+// Colors exactly as specified in Figma
+const COLOR_BG = '#F8F5F2';
+const COLOR_MAROON = '#64102A';
+const COLOR_BUTTON = '#791636';
+const COLOR_INPUT_BORDER = '#918C92';
+const COLOR_PLACEHOLDER = '#8E7F7F';
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const router = useRouter();
@@ -49,7 +63,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       return;
     }
     if (!profilePending && !email.trim()) {
-      setError('Masukkan email akun SSO Universitas Anda.');
+      setError('Masukkan nama pengguna atau email Anda.');
       return;
     }
     if (!profilePending && password.length < 6) {
@@ -87,135 +101,131 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <View style={styles.screen}>
+      {/* 1. Lingkaran Abstrak Ujung Kanan (Top-Right Asset) */}
+      <Image
+        source={require('@/assets/images/lingkaran_ujung_kanan.png')}
+        style={styles.lingkaranUjungKanan}
+        resizeMode="contain"
+        pointerEvents="none"
+      />
+
+      {/* 2. Lingkaran Abstrak Kiri Tengah (Mid-Left Asset behind mascot) */}
+      <Image
+        source={require('@/assets/images/lingkaran_kiri_tengah.png')}
+        style={styles.lingkaranKiriTengah}
+        resizeMode="contain"
+        pointerEvents="none"
+      />
+
+      <KeyboardAvoidingView
+        style={styles.flexOne}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Top Logo and Header */}
-        <View style={styles.headerContainer}>
-          <View style={styles.logoBadge}>
-            <Image
-              source={require('@/assets/images/logo_labora.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-          </View>
-
-          <View style={styles.suitePill}>
-            <Feather name="shield" size={11} color={LaboraColors.primary} style={{ marginRight: 4 }} />
-            <Text style={styles.suitePillText}>SMART LABORATORY SUITE</Text>
-          </View>
-
-          <Text style={styles.brandTitle}>LABORA</Text>
-          <Text style={styles.brandSubtitle}>
-            Sistem Manajemen Laboratorium
-          </Text>
-        </View>
-
-        {/* Main Form Card */}
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>
-            {profilePending
-              ? 'Lengkapi Profil'
-              : isRegister
-              ? 'Registrasi Akun Praktikan'
-              : 'Masuk Portal LABORA'}
-          </Text>
-          <Text style={styles.formSubtitle}>
-            {profilePending
-              ? 'Lengkapi data identitas Anda untuk mengaktifkan akun.'
-              : isRegister
-              ? 'Daftarkan data mahasiswa Anda untuk akses presensi dan jadwal lab.'
-              : 'Gunakan akun SSO resmi Universitas Anda untuk masuk ke sistem.'}
-          </Text>
-
-          {error ? (
-            <View style={styles.errorBox}>
-              <Feather name="alert-circle" size={14} color={LaboraColors.danger} style={{ marginRight: 6 }} />
-              <Text style={styles.errorText}>{error}</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          {/* ================= HEADER: Maskot & Logo ================= */}
+          <View style={styles.headerArea}>
+            {/* Mascot Singa (maskot_labora_login.png) */}
+            <View style={styles.mascotContainer} pointerEvents="none">
+              <Image
+                source={require('@/assets/images/maskot_labora_login.png')}
+                style={styles.mascotImage}
+                resizeMode="contain"
+              />
             </View>
-          ) : null}
 
-          {/* Name Field (for Register or Profile Complete) */}
-          {(isRegister || profilePending) && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Nama Lengkap Mahasiswa</Text>
-              <View style={styles.inputBox}>
-                <Feather name="user" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+            {/* Logo Labora & Typography (logo_labora.png) */}
+            <View style={styles.logoGroup}>
+              <Image
+                source={require('@/assets/images/logo_labora.png')}
+                style={styles.logoIcon}
+                resizeMode="contain"
+              />
+            </View>
+          </View>
+
+          {/* ================= LOGIN SECTION: White Rounded Card ================= */}
+          <View style={styles.loginCard}>
+            {/* Title: Hai, Laborans! */}
+            <Text style={styles.greetingTitle}>Hai, Laborans!</Text>
+
+            {/* Subtitle */}
+            <Text style={styles.greetingSubtitle}>
+              {profilePending
+                ? 'Lengkapi data identitas Anda untuk mengaktifkan akun.'
+                : isRegister
+                ? 'Silakan buat akun baru untuk mengakses laboratorium Anda'
+                : 'Silakan masuk atau buat akun baru untuk mengakses laboratorium Anda'}
+            </Text>
+
+            {/* Error Message */}
+            {error ? (
+              <View style={styles.errorBox}>
+                <Ionicons name="alert-circle" size={16} color={LaboraColors.danger} style={{ marginRight: 6 }} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            {/* Field: Nama Lengkap (Register / Profile Pending) */}
+            {(isRegister || profilePending) && (
+              <View style={styles.inputContainer}>
+                <Ionicons name="person" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="Masukkan nama lengkap"
-                  placeholderTextColor={LaboraColors.textMuted}
+                  style={styles.inputField}
+                  placeholder="Nama Lengkap"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
                   value={name}
                   onChangeText={setName}
                   autoCapitalize="words"
                 />
               </View>
-            </View>
-          )}
+            )}
 
-          {/* NIM Field (for Register or Profile Complete) */}
-          {(isRegister || profilePending) && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Nomor Induk Mahasiswa (NIM)</Text>
-              <View style={styles.inputBox}>
-                <Ionicons name="card-outline" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+            {/* Field: NIM (Register / Profile Pending) */}
+            {(isRegister || profilePending) && (
+              <View style={styles.inputContainer}>
+                <Ionicons name="card" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="cth: 2110511001"
-                  placeholderTextColor={LaboraColors.textMuted}
+                  style={styles.inputField}
+                  placeholder="Nomor Induk Mahasiswa (NIM)"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
                   value={nim}
                   onChangeText={setNim}
                   keyboardType="numeric"
                   autoCapitalize="none"
                 />
               </View>
-            </View>
-          )}
+            )}
 
-          {/* Email Field */}
-          {!profilePending && (
-            <View style={styles.inputGroup}>
-              <View style={styles.inputLabelRow}>
-                <Text style={styles.inputLabel}>
-                  {isRegister ? 'Email Mahasiswa' : 'Email Akun SSO Universitas'}
-                </Text>
-                <Text style={styles.inputLabelBadge}>SSO Terverifikasi</Text>
-              </View>
-              <View style={styles.inputBox}>
-                <Feather name="mail" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+            {/* Field: Username / Email */}
+            {!profilePending && (
+              <View style={styles.inputContainer}>
+                <Ionicons name="person" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.textInput}
-                  placeholder={
-                    isRegister
-                      ? 'nim@student.univ.ac.id'
-                      : 'nama@univ.ac.id atau nim@student.univ.ac.id'
-                  }
-                  placeholderTextColor={LaboraColors.textMuted}
+                  style={styles.inputField}
+                  placeholder="Nama Pengguna / Email"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
                   keyboardType="email-address"
                 />
               </View>
-            </View>
-          )}
+            )}
 
-          {/* Password Field */}
-          {!profilePending && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Kata Sandi</Text>
-              <View style={styles.inputBox}>
-                <Feather name="lock" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+            {/* Field: Password */}
+            {!profilePending && (
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="Masukkan kata sandi akun"
-                  placeholderTextColor={LaboraColors.textMuted}
+                  style={styles.inputField}
+                  placeholder="Kata Sandi"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -223,28 +233,26 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 />
                 <TouchableOpacity
                   onPress={() => setShowPassword((prev) => !prev)}
-                  style={styles.eyeBtn}
+                  style={styles.iconToggle}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Feather
+                  <Ionicons
                     name={showPassword ? 'eye-off' : 'eye'}
-                    size={16}
-                    color={LaboraColors.textSecondary}
+                    size={20}
+                    color={COLOR_MAROON}
                   />
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
+            )}
 
-          {/* Confirm Password Field (Only for Register) */}
-          {isRegister && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Konfirmasi Kata Sandi</Text>
-              <View style={styles.inputBox}>
-                <Feather name="check-circle" size={16} color={LaboraColors.textSecondary} style={styles.inputIcon} />
+            {/* Field: Konfirmasi Password (Register) */}
+            {isRegister && (
+              <View style={styles.inputContainer}>
+                <Ionicons name="checkmark-circle" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="Ulangi kata sandi"
-                  placeholderTextColor={LaboraColors.textMuted}
+                  style={styles.inputField}
+                  placeholder="Konfirmasi Kata Sandi"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry={!showConfirmPassword}
@@ -252,306 +260,289 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 />
                 <TouchableOpacity
                   onPress={() => setShowConfirmPassword((prev) => !prev)}
-                  style={styles.eyeBtn}
+                  style={styles.iconToggle}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Feather
+                  <Ionicons
                     name={showConfirmPassword ? 'eye-off' : 'eye'}
-                    size={16}
-                    color={LaboraColors.textSecondary}
+                    size={20}
+                    color={COLOR_MAROON}
                   />
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
-
-          {/* Forgot Password Link */}
-          {!isRegister && !profilePending && (
-            <TouchableOpacity
-              onPress={handleForgotPassword}
-              style={styles.forgotBtn}
-            >
-              <Text style={styles.forgotText}>Lupa Kata Sandi?</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={[styles.submitButton, busy && { opacity: 0.7 }]}
-            onPress={submit}
-            disabled={busy}
-            activeOpacity={0.8}
-          >
-            {busy ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <View style={styles.submitBtnContent}>
-                <Feather name={isRegister ? 'user-plus' : 'log-in'} size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
-                <Text style={styles.submitBtnText}>
-                  {profilePending
-                    ? 'Simpan Profil'
-                    : isRegister
-                    ? 'Daftar Akun Praktikan'
-                    : 'Masuk ke Portal LABORA'}
-                </Text>
-              </View>
             )}
-          </TouchableOpacity>
-        </View>
 
-        {/* Switch Mode Footer */}
-        <View style={styles.footerRow}>
-          {isRegister ? (
-            <Text style={styles.footerPrompt}>
-              Sudah memiliki akun?{' '}
-              <Link href={'/login' as Href} style={styles.footerLink}>
-                Masuk Sekarang ➔
-              </Link>
-            </Text>
-          ) : (
-            <Text style={styles.footerPrompt}>
-              Belum memiliki akun praktikan?{' '}
-              <Link href={'/register' as Href} style={styles.footerLink}>
-                Daftar Sekarang ➔
-              </Link>
-            </Text>
-          )}
-        </View>
+            {/* Lupa Kata Sandi? */}
+            {!isRegister && !profilePending && (
+              <TouchableOpacity
+                onPress={handleForgotPassword}
+                style={styles.forgotPasswordContainer}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.forgotPasswordText}>Lupa Kata Sandi?</Text>
+              </TouchableOpacity>
+            )}
 
-        {/* Security / Protocol Info Box */}
-        <View style={styles.securityBox}>
-          <View style={styles.securityIconCircle}>
-            <Feather name="shield" size={14} color={LaboraColors.primary} />
+            {/* Tombol MASUK (Pill Button) */}
+            <TouchableOpacity
+              style={[styles.loginButton, busy && { opacity: 0.75 }]}
+              onPress={submit}
+              disabled={busy}
+              activeOpacity={0.85}
+            >
+              {busy ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.loginButtonText}>
+                  {profilePending ? 'SIMPAN' : isRegister ? 'DAFTAR' : 'MASUK'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Belum punya akun? Daftar Sekarang */}
+            <View style={styles.switchAuthRow}>
+              {isRegister ? (
+                <Text style={styles.switchAuthPrompt}>
+                  Sudah punya akun?{' '}
+                  <Link href={'/login' as Href} style={styles.switchAuthHighlight}>
+                    Masuk Sekarang
+                  </Link>
+                </Text>
+              ) : (
+                <Text style={styles.switchAuthPrompt}>
+                  Belum punya akun?{' '}
+                  <Link href={'/register' as Href} style={styles.switchAuthHighlight}>
+                    Daftar Sekarang
+                  </Link>
+                </Text>
+              )}
+            </View>
           </View>
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={styles.securityTitle}>SISTEM PRESENSI RESMI UNIVERSITAS</Text>
-            <Text style={styles.securityDesc}>
-              Tervalidasi GPS Geofencing laboratorium & tersinkronisasi real-time dengan database presensi akademik.
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* 3. Lingkaran Abstrak Ujung Kiri (Bottom-Left Asset) */}
+      <Image
+        source={require('@/assets/images/lingkaran_ujung_kiri.png')}
+        style={styles.lingkaranUjungKiri}
+        resizeMode="contain"
+        pointerEvents="none"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: {
+  screen: {
     flex: 1,
-    backgroundColor: LaboraColors.background,
-  },
-  scroll: {
-    paddingHorizontal: 20,
-    paddingTop: 36,
-    paddingBottom: 40,
-    alignItems: 'center',
-  },
-  headerContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  logoBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#F3D8DF',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-    marginBottom: 12,
+    backgroundColor: COLOR_BG,
     overflow: 'hidden',
+    position: 'relative',
   },
-  logoImage: {
-    width: 50,
-    height: 50,
+  flexOne: {
+    flex: 1,
+    zIndex: 2,
   },
-  suitePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FCE7EC',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#F3D8DF',
-    marginBottom: 6,
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
-  suitePillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: LaboraColors.primary,
-    letterSpacing: 0.8,
+
+  /* ================= FIGMA ABSTRACT IMAGE ASSETS ================= */
+  lingkaranUjungKanan: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: s(215),
+    height: s(243),
+    zIndex: 1,
   },
-  brandTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: LaboraColors.textPrimary,
-    letterSpacing: 1.5,
+  lingkaranKiriTengah: {
+    position: 'absolute',
+    left: 0,
+    top: s(150),
+    width: s(190),
+    height: s(220),
+    zIndex: 1,
   },
-  brandSubtitle: {
-    fontSize: 12,
-    color: LaboraColors.textSecondary,
-    textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 24,
-    lineHeight: 17,
+  lingkaranUjungKiri: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: s(171),
+    height: s(152),
+    zIndex: 10,
   },
-  formCard: {
+
+  /* ================= HEADER: MASCOT & LOGO ================= */
+  headerArea: {
+    height: s(345),
     width: '100%',
+    position: 'relative',
+    justifyContent: 'flex-end',
+    zIndex: 3,
+  },
+  mascotContainer: {
+    position: 'absolute',
+    left: s(-15),
+    bottom: 0,
+    width: s(235),
+    height: s(210),
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+  },
+  mascotImage: {
+    width: '120%',
+    height: '140%',
+  },
+  logoGroup: {
+    position: 'absolute',
+    right: s(22),
+    bottom: s(32),
+    alignItems: 'center',
+    width: s(145),
+  },
+  logoIcon: {
+    width: s(175),
+    height: s(130),
+    marginBottom: s(-15),
+  },
+  subLaboraText: {
+    fontSize: s(9.5),
+    fontWeight: '400',
+    color: '#000000',
+    textAlign: 'center',
+    lineHeight: s(13),
+    marginTop: s(1),
+  },
+
+  /* ================= LOGIN SECTION: WHITE CARD ================= */
+  loginCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: LaboraColors.cardBorder,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    marginTop: s(-3),
+    paddingHorizontal: s(22),
+    paddingTop: s(20),
+    paddingBottom: Platform.OS === 'ios' ? s(38) : s(28),
+    minHeight: SCREEN_HEIGHT * 0.90,
+    zIndex: 4,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 8,
   },
-  formTitle: {
-    fontSize: 18,
+  greetingTitle: {
+    fontSize: s(34),
     fontWeight: '700',
-    color: LaboraColors.textPrimary,
+    lineHeight: s(42),
+    color: COLOR_MAROON,
+    textAlign: 'center',
+    marginBottom: s(6),
   },
-  formSubtitle: {
-    fontSize: 12,
-    color: LaboraColors.textSecondary,
-    marginTop: 3,
-    marginBottom: 16,
+  greetingSubtitle: {
+    fontSize: s(15.5),
+    fontWeight: '500',
+    lineHeight: s(21),
+    color: '#000000',
+    textAlign: 'center',
+    paddingHorizontal: s(12),
+    marginBottom: s(24),
   },
+
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FEE2E2',
     borderWidth: 1,
     borderColor: '#FECACA',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 14,
+    borderRadius: 5,
+    padding: s(10),
+    marginBottom: s(14),
   },
   errorText: {
-    fontSize: 12,
+    fontSize: s(12),
     color: LaboraColors.danger,
     flex: 1,
   },
-  inputGroup: {
-    marginBottom: 14,
-  },
-  inputLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: LaboraColors.textPrimary,
-    marginBottom: 6,
-  },
-  inputLabelBadge: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: LaboraColors.primaryLight,
-  },
-  inputBox: {
+
+  inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FBF8F9',
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#EFE5EB',
-    paddingHorizontal: 12,
-    height: 48,
+    borderColor: COLOR_INPUT_BORDER,
+    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
+    height: s(50),
+    paddingHorizontal: s(14),
+    marginBottom: s(14),
   },
   inputIcon: {
-    marginRight: 8,
+    marginRight: s(12),
   },
-  textInput: {
+  inputField: {
     flex: 1,
-    fontSize: 13,
-    color: LaboraColors.textPrimary,
+    fontSize: s(15),
+    fontWeight: '500',
+    color: '#1E293B',
     height: '100%',
+    paddingVertical: 0,
   },
-  eyeBtn: {
-    padding: 6,
+  iconToggle: {
+    padding: s(6),
+    marginLeft: s(4),
   },
-  forgotBtn: {
+
+  forgotPasswordContainer: {
     alignSelf: 'flex-end',
-    marginBottom: 16,
+    marginTop: s(2),
+    marginBottom: s(24),
+    paddingVertical: s(4),
   },
-  forgotText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: LaboraColors.primary,
+  forgotPasswordText: {
+    fontSize: s(14),
+    fontWeight: '500',
+    lineHeight: s(18),
+    color: COLOR_MAROON,
   },
-  submitButton: {
-    backgroundColor: LaboraColors.primary,
-    borderRadius: 14,
-    height: 48,
+
+  loginButton: {
+    backgroundColor: COLOR_BUTTON,
+    borderRadius: 30,
+    height: s(50),
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: LaboraColors.primary,
+    marginBottom: s(20),
+    shadowColor: COLOR_BUTTON,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 5,
     elevation: 3,
   },
-  submitBtnContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  submitBtnText: {
-    fontSize: 14,
+  loginButtonText: {
+    fontSize: s(16),
     fontWeight: '700',
     color: '#FFFFFF',
-  },
-  footerRow: {
-    marginTop: 16,
-    marginBottom: 16,
-  },
-  footerPrompt: {
-    fontSize: 13,
-    color: LaboraColors.textSecondary,
-  },
-  footerLink: {
-    fontWeight: '700',
-    color: LaboraColors.primary,
-  },
-  securityBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FCE7EC',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#F3D8DF',
-    width: '100%',
-  },
-  securityIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  securityTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: LaboraColors.primary,
+    lineHeight: s(20),
+    textAlign: 'center',
     letterSpacing: 0.5,
   },
-  securityDesc: {
-    fontSize: 10,
-    color: LaboraColors.textSecondary,
-    lineHeight: 14,
-    marginTop: 1,
+
+  switchAuthRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: s(4),
+  },
+  switchAuthPrompt: {
+    fontSize: s(15),
+    fontWeight: '500',
+    lineHeight: s(20),
+    color: '#000000',
+    textAlign: 'center',
+  },
+  switchAuthHighlight: {
+    fontWeight: '700',
+    color: COLOR_MAROON,
   },
 });
