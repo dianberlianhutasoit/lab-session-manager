@@ -1,33 +1,63 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useState } from 'react';
+import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import {
   ActivityIndicator,
-  SafeAreaView,
+  Alert,
+  Dimensions,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-} from "react-native";
-import { StatusBar } from "expo-status-bar";
-import { Feather, Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
-import { useSessionContext } from "@/context/session-context";
-import { useAuth } from "@/context/auth-context";
-import { LaboraColors, Spacing, MaxContentWidth } from "@/constants/theme";
-import { GeofenceRadar } from "@/components/labora/GeofenceRadar";
-import { SensorChecklist } from "@/components/labora/SensorChecklist";
-import { findLabForRoom, distanceInMeters } from "@/utils/attendance-location";
+} from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import { useSessionContext } from '@/context/session-context';
+import { useAuth } from '@/context/auth-context';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const SCALE = Math.min(Math.max(SCREEN_WIDTH / 402, 0.85), 1.25);
+const s = (val: number) => Math.round(val * SCALE);
+
+// Color tokens matching the app theme
+const COLOR_BG = '#F8F5F2';
+const COLOR_MAROON = '#64102A';
+const COLOR_TEXT_DARK = '#1E293B';
+const COLOR_TEXT_MUTED = '#64748B';
+const COLOR_DIVIDER = '#F1E9E9';
+
+const MONTH_NAMES_INDO = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
+const DAY_NAMES_INDO = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function formatDateIndo(dateStr?: string) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const day = DAY_NAMES_INDO[d.getDay()];
+      const dateNum = d.getDate();
+      const month = MONTH_NAMES_INDO[d.getMonth()].slice(0, 3);
+      const year = d.getFullYear();
+      return `${day}, ${dateNum} ${month} ${year}`;
+    }
+  } catch {}
+  return dateStr;
+}
 
 export default function PraktikanDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const safeAreaInsets = useSafeAreaInsets();
   const [submitting, setSubmitting] = useState(false);
-  const [isCalibrating, setIsCalibrating] = useState(false);
-  const [attendanceError, setAttendanceError] = useState("");
-  const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const { sessions, schedules, attendance, recordAttendance, loading, labs } =
+  const { sessions, schedules, attendance, recordAttendance, loading, users, classes } =
     useSessionContext();
   const { profile } = useAuth();
 
@@ -35,6 +65,7 @@ export default function PraktikanDetailScreen() {
   const schedule = session
     ? schedules.find((item) => item.id === session.scheduleId)
     : undefined;
+
   const practitioner = profile;
   const attendanceRecord =
     session && practitioner
@@ -43,116 +74,105 @@ export default function PraktikanDetailScreen() {
         )
       : undefined;
 
-  // Temukan objek lab yang cocok
-  const lab = findLabForRoom(labs, schedule?.room);
-
-  // Ambil lokasi GPS saat pertama dibuka
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.status !== Location.PermissionStatus.GRANTED || !isMounted) {
-          return;
-        }
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        if (isMounted) {
-          setCurrentCoords({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-        }
-      } catch {
-        // ignore background fetch error
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Kalibrasi ulang manual
-  const handleCalibrate = useCallback(async () => {
-    try {
-      setIsCalibrating(true);
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== Location.PermissionStatus.GRANTED) {
-        return;
-      }
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      setCurrentCoords({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      });
-    } catch {
-      // ignore
-    } finally {
-      setIsCalibrating(false);
+  // Temukan nama asisten praktikum
+  const assistantUser = React.useMemo(() => {
+    if (!session && !schedule) return undefined;
+    if (session?.assistantId) {
+      const u = users.find((user) => user.id === session.assistantId);
+      if (u) return u;
     }
-  }, []);
-
-  // Hitung jarak aktual ke lab (atau default realistis 14.2 meter untuk preview jika koordinat belum diperoleh)
-  const distance = currentCoords && lab
-    ? distanceInMeters(
-        currentCoords.latitude,
-        currentCoords.longitude,
-        lab.latitude,
-        lab.longitude
-      )
-    : 14.2;
-
-  const isWithinRadius = distance <= 30;
+    if (schedule?.classId) {
+      const c = classes.find((item) => item.id === schedule.classId);
+      if (c?.assistantId) {
+        return users.find((user) => user.id === c.assistantId);
+      }
+    }
+    return undefined;
+  }, [session, schedule, users, classes]);
 
   if (!session || !schedule) {
     if (loading) {
       return (
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.centerContainer}>
-            <ActivityIndicator color={LaboraColors.primary} size="large" />
-          </View>
-        </SafeAreaView>
+        <View style={[styles.screen, styles.centerContainer]}>
+          <ActivityIndicator color={COLOR_MAROON} size="large" />
+        </View>
       );
     }
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <View style={[styles.screen, styles.centerContainer]}>
         <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorTitle}>Sesi Tidak Ditemukan</Text>
-          <Text style={styles.errorText}>
-            Informasi sesi praktikum ini tidak tersedia atau sudah dihapus.
-          </Text>
-          <TouchableOpacity
-            style={styles.backButtonPill}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.backButtonPillText}>Kembali ke Jadwal</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+        <Ionicons name="alert-circle-outline" size={54} color={COLOR_MAROON} />
+        <Text style={styles.errorTitle}>Data tidak ditemukan</Text>
+        <Text style={styles.errorSubtitle}>
+          Informasi sesi praktikum ini tidak tersedia atau sudah dihapus.
+        </Text>
+        <TouchableOpacity
+          style={styles.errorBackButton}
+          onPress={() => router.back()}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.errorBackButtonText}>Kembali</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
-  const isOpen = session.status === "OPEN";
+  const isOpen = session.status === 'OPEN';
   const hasAttended = attendanceRecord !== undefined;
 
+  // Nilai data dengan fallback 'Data tidak ditemukan' sesuai instruksi
+  const courseTitle = schedule.title || 'Data tidak ditemukan';
+  const sessionNumberText =
+    schedule.sessionNumber != null ? `Pertemuan ${schedule.sessionNumber}` : 'Data tidak ditemukan';
+  const topicText = schedule.topic || 'Data tidak ditemukan';
+  const bannerSubtitle = `${sessionNumberText} – ${topicText}`;
+  const assistantName = assistantUser?.name || 'Data tidak ditemukan';
+  const roomName = schedule.room || 'Data tidak ditemukan';
+
+  // Format tanggal & waktu
+  const formattedDate = formatDateIndo(schedule.date);
+  const timeRange =
+    schedule.startTime && schedule.endTime
+      ? `${schedule.startTime} – ${schedule.endTime}`
+      : 'Data tidak ditemukan';
+  const dateTimeString = formattedDate
+    ? `${formattedDate}  |  ${timeRange}`
+    : timeRange !== 'Data tidak ditemukan'
+    ? timeRange
+    : 'Data tidak ditemukan';
+
   const handlePresensi = async () => {
-    if (!isOpen || hasAttended || !practitioner) return;
-    setSubmitting(true);
-    setAttendanceError("");
+    if (hasAttended) {
+      Alert.alert('Presensi', 'Anda sudah melakukan presensi pada sesi praktikum ini.');
+      return;
+    }
+
+    if (!isOpen) {
+      Alert.alert(
+        'Sesi Ditutup',
+        'Sesi praktikum ini belum dibuka atau sudah ditutup oleh asisten laboratorium.'
+      );
+      return;
+    }
+
+    if (!practitioner) return;
+
     try {
+      setSubmitting(true);
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== Location.PermissionStatus.GRANTED) {
-        throw new Error("Izin lokasi diperlukan untuk memverifikasi presensi di laboratorium.");
+        Alert.alert(
+          'Izin Lokasi Diperlukan',
+          'Izin lokasi GPS diperlukan untuk memverifikasi kehadiran Anda di laboratorium.'
+        );
+        return;
       }
+
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-      const created = await recordAttendance(
+
+      const success = await recordAttendance(
         session.id,
         practitioner.id,
         new Date().toISOString(),
@@ -162,631 +182,527 @@ export default function PraktikanDetailScreen() {
           accuracy: position.coords.accuracy,
         }
       );
-      if (!created) {
-        setAttendanceError("Presensi untuk sesi ini sudah tercatat sebelumnya.");
+
+      if (success) {
+        Alert.alert('Presensi Berhasil', 'Presensi Anda telah berhasil diverifikasi dan dicatat.');
+      } else {
+        Alert.alert('Informasi Presensi', 'Presensi Anda pada sesi ini sudah tercatat sebelumnya.');
       }
-    } catch (cause) {
-      setAttendanceError(
-        cause instanceof Error
-          ? cause.message
-          : "Presensi gagal disimpan. Pastikan Anda berada dalam jangkauan lab 30 meter."
+    } catch (err) {
+      Alert.alert(
+        'Presensi Gagal',
+        err instanceof Error ? err.message : 'Terjadi kesalahan saat memverifikasi lokasi presensi.'
       );
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleLihatLokasiLab = () => {
+    router.push('/maps' as Href);
+  };
+
+  const handleAjukanIzin = () => {
+    router.push('/praktikan/izin' as Href);
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
+    <View style={styles.screen}>
+      <StatusBar style="light" />
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Top Header Bar */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.iconNavBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <Feather name="arrow-left" size={20} color={LaboraColors.primary} />
-        </TouchableOpacity>
+      {/* ================= 1. HEADER BATIK DENGAN TOMBOL BACK ================= */}
+      <View
+        style={[
+          styles.headerBackground,
+          { paddingTop: Math.max(safeAreaInsets.top, s(20)) + s(10) },
+        ]}
+      >
+        <Image
+          source={require('@/assets/images/bg_batik.png')}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
 
-        <Text style={styles.topBarTitle}>Detail Sesi Praktikum</Text>
+        <View style={styles.headerContentRow}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
 
-        <View style={styles.avatarCircle}>
-          <Text style={styles.avatarInitial}>
-            {practitioner?.name?.trim().charAt(0).toUpperCase() || "P"}
-          </Text>
+          <Text style={styles.headerTitle}>Detail Sesi Praktikum</Text>
+
+          {/* Placeholder seimbang untuk perataan judul di tengah */}
+          <View style={styles.headerRightPlaceholder} />
         </View>
       </View>
 
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.container}>
-          {/* Topic Title */}
-          <View style={styles.topicHeader}>
-            <Text style={styles.topicSubtitle}>
-              {schedule.courseCode} • Modul Praktikum
-            </Text>
-            <Text style={styles.topicTitle}>
-              {schedule.topic || schedule.title || "VLAN Routing & Subnet Isolation"}
-            </Text>
-          </View>
-
-          {/* 2 Information Cards: Laboratorium & Batas Presensi */}
-          <View style={styles.infoTwoColRow}>
-            {/* Card 1: Ruang Lab */}
-            <View style={styles.infoCard}>
-              <View style={styles.infoIconCircle}>
-                <Feather name="home" size={16} color={LaboraColors.primary} />
-              </View>
-              <View style={styles.infoCardContent}>
-                <Text style={styles.infoCardLabel}>Laboratorium</Text>
-                <Text style={styles.infoCardMain} numberOfLines={1}>
-                  {schedule.room}
-                </Text>
-                <Text style={styles.infoCardSub}>
-                  {lab?.building ? `Gedung ${lab.building}` : "Gedung F Lantai 3"}
-                </Text>
-              </View>
+        {/* ================= 2. KARTU DETAIL UTAMA (PUTIH) ================= */}
+        <View style={styles.detailCard}>
+          {/* Banner Top Praktikum */}
+          <View style={styles.courseBanner}>
+            <View style={styles.flaskBadge}>
+              <Ionicons name="flask-outline" size={26} color="#FFFFFF" />
             </View>
 
-            {/* Card 2: Batas Waktu */}
-            <View style={styles.infoCard}>
-              <View style={styles.infoIconCircle}>
-                <Feather name="clock" size={16} color={LaboraColors.primary} />
-              </View>
-              <View style={styles.infoCardContent}>
-                <Text style={styles.infoCardLabel}>Batas Presensi</Text>
-                <Text style={styles.infoCardMain}>
-                  {schedule.startTime} - {schedule.endTime}
-                </Text>
-                <Text style={styles.infoCardSubHighlight}>Toleransi 15 Mnt</Text>
-              </View>
+            <View style={styles.courseBannerTextCol}>
+              <Text style={styles.courseBannerTitle} numberOfLines={1}>
+                {courseTitle}
+              </Text>
+              <Text style={styles.courseBannerSubtitle} numberOfLines={2}>
+                {bannerSubtitle}
+              </Text>
             </View>
           </View>
 
-          {/* Section: Pemindaian Geofence 30m */}
-          <View style={styles.sectionBlock}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionTitleWithIcon}>
-                <Feather name="compass" size={18} color={LaboraColors.primary} />
-                <Text style={styles.sectionTitle}>Pemindaian Geofence 30m</Text>
-              </View>
-              <View style={styles.realtimePill}>
-                <Text style={styles.realtimePillText}>GPS Realtime</Text>
-              </View>
+          {/* 1. Baris Asisten Praktikum */}
+          <View style={styles.infoRow}>
+            <Ionicons name="person-outline" size={20} color={COLOR_TEXT_MUTED} />
+            <View style={styles.infoCol}>
+              <Text style={styles.infoLabel}>Asisten Praktikum</Text>
+              <Text style={styles.infoValue}>{assistantName}</Text>
             </View>
+          </View>
 
-            {/* Radar Component */}
-            <GeofenceRadar
-              distanceMeters={distance}
-              maxRadius={30}
-              labName={lab?.name || schedule.room}
-              isWithinRadius={isWithinRadius}
-              onRecenter={handleCalibrate}
+          <View style={styles.rowDivider} />
+
+          {/* 2. Baris Tanggal & Waktu */}
+          <View style={styles.infoRow}>
+            <Ionicons name="calendar-outline" size={20} color={COLOR_TEXT_MUTED} />
+            <View style={styles.infoCol}>
+              <Text style={styles.infoLabel}>Tanggal & Waktu</Text>
+              <Text style={styles.infoValue}>{dateTimeString}</Text>
+            </View>
+          </View>
+
+          <View style={styles.rowDivider} />
+
+          {/* 3. Baris Lokasi Laboratorium */}
+          <View style={styles.infoRow}>
+            <Ionicons name="location-outline" size={20} color={COLOR_TEXT_MUTED} />
+            <View style={styles.infoCol}>
+              <Text style={styles.infoLabel}>Lokasi Laboratorium</Text>
+              <Text style={styles.infoValue}>{roomName}</Text>
+            </View>
+          </View>
+
+          <View style={styles.rowDivider} />
+
+          {/* 4. Baris Status Sesi */}
+          <View style={styles.infoRow}>
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={22}
+              color={isOpen ? '#16A34A' : COLOR_TEXT_MUTED}
             />
-
-            {/* Status Valid Radius Banner */}
-            <View
-              style={[
-                styles.radiusValidBanner,
-                isWithinRadius ? styles.radiusValidOk : styles.radiusValidWarn,
-              ]}
-            >
-              <View style={styles.radiusValidLeft}>
+            <View style={styles.infoCol}>
+              <View style={styles.statusHeaderRow}>
+                <Text style={styles.statusLabelTitle}>Status Sesi</Text>
                 <View
                   style={[
-                    styles.radiusValidIconCircle,
-                    isWithinRadius ? styles.radiusOkBg : styles.radiusWarnBg,
+                    styles.statusPill,
+                    isOpen ? styles.statusPillOpen : styles.statusPillClosed,
                   ]}
                 >
-                  <Feather
-                    name={isWithinRadius ? "check" : "alert-circle"}
-                    size={16}
-                    color={isWithinRadius ? "#047857" : "#B45309"}
-                  />
-                </View>
-                <View>
-                  <Text style={styles.radiusValidTitle}>
-                    {isWithinRadius ? "Dalam Radius Valid" : "Di Luar Radius Lab"}
-                  </Text>
-                  <Text style={styles.radiusValidSubtitle}>
-                    {isWithinRadius
-                      ? "Toleransi maksimal 30 meter terpenuhi"
-                      : "Silakan mendekat ke area laboratorium"}
+                  <Text
+                    style={[
+                      styles.statusPillText,
+                      isOpen ? styles.statusPillTextOpen : styles.statusPillTextClosed,
+                    ]}
+                  >
+                    {isOpen ? 'Dibuka' : 'Ditutup'}
                   </Text>
                 </View>
               </View>
-              <View
-                style={[
-                  styles.readyPill,
-                  isWithinRadius ? styles.readyOk : styles.readyWarn,
-                ]}
-              >
-                <Text
+              <Text style={styles.statusSubtext}>
+                {isOpen
+                  ? 'Sesi presensi sedang berlangsung.'
+                  : 'Sesi presensi telah ditutup atau belum dibuka.'}
+              </Text>
+            </View>
+          </View>
+
+          {/* 5. Box Status Kehadiran Anda */}
+          <View style={styles.attendanceBox}>
+            <Ionicons
+              name={hasAttended ? 'checkmark-circle' : 'checkmark-circle'}
+              size={24}
+              color="#16A34A"
+            />
+            <View style={styles.attendanceBoxCol}>
+              <View style={styles.attendanceHeaderRow}>
+                <Text style={styles.attendanceBoxTitle}>Status Kehadiran Anda</Text>
+                <View
                   style={[
-                    styles.readyPillText,
-                    isWithinRadius ? styles.readyOkText : styles.readyWarnText,
+                    styles.attendanceBadge,
+                    hasAttended ? styles.attendanceBadgeAttended : styles.attendanceBadgePending,
                   ]}
                 >
-                  {isWithinRadius ? "Siap Presensi" : "Jarak Jauh"}
-                </Text>
+                  <Text
+                    style={[
+                      styles.attendanceBadgeText,
+                      hasAttended
+                        ? styles.attendanceBadgeTextAttended
+                        : styles.attendanceBadgeTextPending,
+                    ]}
+                  >
+                    {hasAttended ? 'Hadir' : 'Belum Presensi'}
+                  </Text>
+                </View>
               </View>
-            </View>
-          </View>
-
-          {/* Section: Verifikasi Sensor & Perangkat */}
-          <View style={styles.sectionBlock}>
-            <SensorChecklist isLocationAccurate={true} isMockDetected={false} />
-          </View>
-
-          {/* Error Banner jika ada */}
-          {!!attendanceError && (
-            <View style={styles.errorAlertBox}>
-              <Feather name="alert-triangle" size={16} color="#B91C1C" />
-              <Text style={styles.errorAlertText}>{attendanceError}</Text>
-            </View>
-          )}
-
-          {/* Already Attended Card */}
-          {hasAttended && (
-            <View style={styles.successAttendanceCard}>
-              <View style={styles.successIconCircle}>
-                <Feather name="check" size={24} color="#047857" />
-              </View>
-              <View style={styles.successTextCol}>
-                <Text style={styles.successTitle}>Presensi Berhasil Diverifikasi</Text>
-                <Text style={styles.successSubtitle}>
-                  Tercatat pada: {formatAttendanceTime(attendanceRecord.recordedAt)} WIB
-                </Text>
-                <Text style={styles.successRadius}>Radius GPS: {distance} meter (Valid)</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Action Buttons */}
-          {!hasAttended ? (
-            <View style={styles.actionButtonGroup}>
-              {/* Primary: Kirim Presensi */}
-              <TouchableOpacity
-                style={[
-                  styles.primaryPresensiBtn,
-                  (!isOpen || submitting) && styles.disabledBtn,
-                ]}
-                disabled={!isOpen || submitting}
-                onPress={handlePresensi}
-                activeOpacity={0.85}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="finger-print-outline" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.primaryPresensiBtnText}>
-                      {isOpen ? "Kirim Presensi Sekarang" : "Sesi Praktikum Tertutup"}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {/* Secondary: Kalibrasi Ulang GPS */}
-              <TouchableOpacity
-                style={styles.calibrateBtn}
-                onPress={handleCalibrate}
-                disabled={isCalibrating}
-                activeOpacity={0.8}
-              >
-                {isCalibrating ? (
-                  <ActivityIndicator size="small" color={LaboraColors.primary} />
-                ) : (
-                  <>
-                    <Feather name="refresh-cw" size={16} color={LaboraColors.primary} style={{ marginRight: 6 }} />
-                    <Text style={styles.calibrateBtnText}>Kalibrasi Ulang GPS</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {/* Ketentuan Presensi Footer Info */}
-          <View style={styles.policyNoticeBox}>
-            <View style={styles.policyIconCircle}>
-              <Feather name="info" size={16} color={LaboraColors.primary} />
-            </View>
-            <View style={styles.policyTextCol}>
-              <Text style={styles.policyHeading}>Ketentuan Presensi</Text>
-              <Text style={styles.policyText}>
-                Presensi hanya diakui jika perangkat Anda terdeteksi dalam zona perimeter 30 meter dan berstatus aktif selama jam operasional modul. Tindakan manipulasi koordinat akan otomatis membatalkan kehadiran.
+              <Text style={styles.attendanceBoxSubtext}>
+                {hasAttended
+                  ? 'Presensi Anda telah berhasil tercatat pada sesi ini.'
+                  : 'Anda belum melakukan presensi pada sesi ini.'}
               </Text>
             </View>
           </View>
         </View>
+
+        {/* ================= 3. TOMBOL AKSI ================= */}
+        <View style={styles.actionButtonsContainer}>
+          {/* Tombol Utama: Presensi */}
+          <TouchableOpacity
+            style={[
+              styles.primaryButton,
+              (hasAttended || !isOpen) && styles.primaryButtonDisabled,
+            ]}
+            onPress={handlePresensi}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Ionicons name="qr-code-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>
+                  {hasAttended ? 'Sudah Presensi' : 'Presensi'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Tombol Kedua: Lihat Lokasi Lab */}
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleLihatLokasiLab}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="location-outline" size={19} color={COLOR_MAROON} />
+            <Text style={styles.secondaryButtonText}>Lihat Lokasi Lab</Text>
+          </TouchableOpacity>
+
+          {/* Tombol Ketiga: Ajukan Izin */}
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleAjukanIzin}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="paper-plane-outline" size={18} color={COLOR_MAROON} />
+            <Text style={styles.secondaryButtonText}>Ajukan Izin</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-function formatAttendanceTime(recordedAt: string) {
-  try {
-    const d = new Date(recordedAt);
-    return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "-";
-  }
-}
-
 const styles = StyleSheet.create({
-  safeArea: {
+  screen: {
     flex: 1,
-    backgroundColor: LaboraColors.background,
-  },
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: Spacing.four,
-    paddingVertical: 12,
-    backgroundColor: LaboraColors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: LaboraColors.cardBorder,
-  },
-  iconNavBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: LaboraColors.card,
-    borderWidth: 1,
-    borderColor: LaboraColors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: LaboraColors.primary,
-  },
-  avatarCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: LaboraColors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarInitial: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    backgroundColor: COLOR_BG,
   },
   scrollContent: {
-    paddingHorizontal: Spacing.four,
-    paddingTop: 16,
-    paddingBottom: 40,
-    maxWidth: MaxContentWidth,
-    alignSelf: "center",
-    width: "100%",
-  },
-  container: {
-    gap: 16,
-  },
-  topicHeader: {
-    gap: 4,
-  },
-  topicSubtitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: LaboraColors.primary,
-    letterSpacing: 0.6,
-  },
-  topicTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
+    flexGrow: 1,
+    paddingBottom: s(36),
   },
 
-  /* 2 Info Cards */
-  infoTwoColRow: {
-    flexDirection: "row",
-    gap: 10,
+  /* ================= 1. HEADER ================= */
+  headerBackground: {
+    width: '100%',
+    backgroundColor: '#64102A',
+    paddingHorizontal: s(16),
+    paddingBottom: s(18),
+    position: 'relative',
+    overflow: 'hidden',
   },
-  infoCard: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: LaboraColors.card,
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: LaboraColors.cardBorder,
-    gap: 10,
+  headerContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  infoIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: LaboraColors.blush,
-    alignItems: "center",
-    justifyContent: "center",
+  backButton: {
+    padding: s(6),
   },
-  infoCardContent: {
-    flex: 1,
+  headerTitle: {
+    fontSize: s(18),
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
-  infoCardLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: LaboraColors.textMuted,
-  },
-  infoCardMain: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
-  },
-  infoCardSub: {
-    fontSize: 10,
-    color: LaboraColors.textSecondary,
-  },
-  infoCardSubHighlight: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: LaboraColors.warning,
+  headerRightPlaceholder: {
+    width: s(36),
   },
 
-  /* Section Block */
-  sectionBlock: {
-    gap: 10,
-  },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  sectionTitleWithIcon: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
-  },
-  realtimePill: {
-    backgroundColor: LaboraColors.surfaceAlt,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 9999,
-  },
-  realtimePillText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: LaboraColors.textSecondary,
-  },
-
-  /* Radius Banner */
-  radiusValidBanner: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-  },
-  radiusValidOk: {
-    backgroundColor: "#F0FDF4",
-    borderColor: "#DCFCE7",
-  },
-  radiusValidWarn: {
-    backgroundColor: "#FFFBEB",
-    borderColor: "#FEF3C7",
-  },
-  radiusValidLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  radiusValidIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radiusOkBg: {
-    backgroundColor: "#DCFCE7",
-  },
-  radiusWarnBg: {
-    backgroundColor: "#FEF3C7",
-  },
-  radiusValidTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
-  },
-  radiusValidSubtitle: {
-    fontSize: 11,
-    color: LaboraColors.textSecondary,
-  },
-  readyPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  readyOk: {
-    backgroundColor: "#DCFCE7",
-  },
-  readyWarn: {
-    backgroundColor: "#FEF3C7",
-  },
-  readyPillText: {
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  readyOkText: {
-    color: "#047857",
-  },
-  readyWarnText: {
-    color: "#B45309",
-  },
-
-  /* Action Buttons */
-  actionButtonGroup: {
-    gap: 10,
-    marginTop: 4,
-  },
-  primaryPresensiBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: LaboraColors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
-    shadowColor: LaboraColors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+  /* ================= 2. DETAIL CARD ================= */
+  detailCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: s(20),
+    marginHorizontal: s(16),
+    marginTop: s(14),
+    padding: s(16),
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 3,
   },
-  primaryPresensiBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FFFFFF",
+  courseBanner: {
+    backgroundColor: '#FDE8EC',
+    borderRadius: s(14),
+    padding: s(12),
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: s(14),
   },
-  calibrateBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: LaboraColors.surfaceAlt,
-    borderRadius: 14,
-    paddingVertical: 12,
+  flaskBadge: {
+    width: s(48),
+    height: s(48),
+    borderRadius: s(14),
+    backgroundColor: '#64102A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: s(12),
   },
-  calibrateBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: LaboraColors.primary,
+  courseBannerTextCol: {
+    flex: 1,
   },
-  disabledBtn: {
-    opacity: 0.6,
+  courseBannerTitle: {
+    fontSize: s(15.5),
+    fontWeight: '700',
+    color: COLOR_TEXT_DARK,
+    marginBottom: s(3),
+    includeFontPadding: false,
+  },
+  courseBannerSubtitle: {
+    fontSize: s(12),
+    fontWeight: '500',
+    color: COLOR_TEXT_MUTED,
+    includeFontPadding: false,
   },
 
-  /* Policy notice */
-  policyNoticeBox: {
-    flexDirection: "row",
-    backgroundColor: LaboraColors.card,
-    borderRadius: 16,
-    padding: 14,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: LaboraColors.cardBorder,
+  /* Baris Info */
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: s(6),
+    gap: s(12),
   },
-  policyIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: LaboraColors.blush,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  policyTextCol: {
+  infoCol: {
     flex: 1,
-    gap: 4,
   },
-  policyHeading: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
+  infoLabel: {
+    fontSize: s(11.5),
+    fontWeight: '400',
+    color: COLOR_TEXT_MUTED,
+    marginBottom: s(2),
+    includeFontPadding: false,
   },
-  policyText: {
-    fontSize: 11,
-    color: LaboraColors.textSecondary,
-    lineHeight: 16,
+  infoValue: {
+    fontSize: s(13.5),
+    fontWeight: '600',
+    color: COLOR_TEXT_DARK,
+    includeFontPadding: false,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: COLOR_DIVIDER,
+    marginVertical: s(6),
   },
 
-  /* Success card */
-  successAttendanceCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F0FDF4",
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#DCFCE7",
-    gap: 12,
+  /* Baris Status Sesi */
+  statusHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  successIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#DCFCE7",
-    alignItems: "center",
-    justifyContent: "center",
+  statusLabelTitle: {
+    fontSize: s(13.5),
+    fontWeight: '700',
+    color: COLOR_TEXT_DARK,
+    includeFontPadding: false,
   },
-  successTextCol: {
-    flex: 1,
-    gap: 2,
+  statusPill: {
+    paddingVertical: s(3),
+    paddingHorizontal: s(10),
+    borderRadius: s(12),
   },
-  successTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#047857",
+  statusPillOpen: {
+    backgroundColor: '#EAF8EC',
   },
-  successSubtitle: {
-    fontSize: 12,
-    color: "#065F46",
+  statusPillClosed: {
+    backgroundColor: '#F1F5F9',
   },
-  successRadius: {
-    fontSize: 11,
-    color: "#047857",
-    fontWeight: "600",
+  statusPillText: {
+    fontSize: s(11),
+    fontWeight: '600',
+    includeFontPadding: false,
+  },
+  statusPillTextOpen: {
+    color: '#16A34A',
+  },
+  statusPillTextClosed: {
+    color: COLOR_TEXT_MUTED,
+  },
+  statusSubtext: {
+    fontSize: s(11.5),
+    color: COLOR_TEXT_MUTED,
+    marginTop: s(2),
+    includeFontPadding: false,
   },
 
-  /* Error state */
-  errorAlertBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FEF2F2",
-    padding: 12,
-    borderRadius: 12,
+  /* Box Status Kehadiran */
+  attendanceBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: s(12),
     borderWidth: 1,
-    borderColor: "#FEE2E2",
-    gap: 8,
+    borderColor: '#E2E8F0',
+    padding: s(12),
+    marginTop: s(12),
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: s(10),
   },
-  errorAlertText: {
-    color: "#B91C1C",
-    fontSize: 12,
+  attendanceBoxCol: {
     flex: 1,
-    fontWeight: "600",
   },
+  attendanceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  attendanceBoxTitle: {
+    fontSize: s(13),
+    fontWeight: '700',
+    color: COLOR_TEXT_DARK,
+    includeFontPadding: false,
+  },
+  attendanceBadge: {
+    paddingVertical: s(3),
+    paddingHorizontal: s(8),
+    borderRadius: s(12),
+  },
+  attendanceBadgeAttended: {
+    backgroundColor: '#EAF8EC',
+  },
+  attendanceBadgePending: {
+    backgroundColor: '#FDE8EC',
+  },
+  attendanceBadgeText: {
+    fontSize: s(11),
+    fontWeight: '600',
+    includeFontPadding: false,
+  },
+  attendanceBadgeTextAttended: {
+    color: '#16A34A',
+  },
+  attendanceBadgeTextPending: {
+    color: COLOR_MAROON,
+  },
+  attendanceBoxSubtext: {
+    fontSize: s(11.5),
+    color: COLOR_TEXT_MUTED,
+    marginTop: s(3),
+    includeFontPadding: false,
+  },
+
+  /* ================= 3. TOMBOL AKSI ================= */
+  actionButtonsContainer: {
+    paddingHorizontal: s(16),
+    marginTop: s(16),
+    gap: s(10),
+  },
+  primaryButton: {
+    backgroundColor: COLOR_MAROON,
+    height: s(48),
+    borderRadius: s(12),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: s(8),
+    shadowColor: COLOR_MAROON,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: '#9F6877',
+    elevation: 0,
+  },
+  primaryButtonText: {
+    fontSize: s(15),
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+    includeFontPadding: false,
+  },
+  secondaryButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: COLOR_MAROON,
+    height: s(48),
+    borderRadius: s(12),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: s(8),
+  },
+  secondaryButtonText: {
+    fontSize: s(14.5),
+    fontWeight: '700',
+    color: COLOR_MAROON,
+    letterSpacing: 0.2,
+    includeFontPadding: false,
+  },
+
+  /* Center Container / Error */
   centerContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: s(24),
   },
   errorTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: LaboraColors.textPrimary,
-    marginBottom: 8,
+    fontSize: s(18),
+    fontWeight: '700',
+    color: COLOR_TEXT_DARK,
+    marginTop: s(12),
+    marginBottom: s(4),
   },
-  errorText: {
-    fontSize: 13,
-    color: LaboraColors.textSecondary,
-    textAlign: "center",
-    marginBottom: 16,
+  errorSubtitle: {
+    fontSize: s(13),
+    color: COLOR_TEXT_MUTED,
+    textAlign: 'center',
+    marginBottom: s(16),
   },
-  backButtonPill: {
-    backgroundColor: LaboraColors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+  errorBackButton: {
+    backgroundColor: COLOR_MAROON,
+    paddingVertical: s(10),
+    paddingHorizontal: s(20),
+    borderRadius: s(20),
   },
-  backButtonPillText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 13,
+  errorBackButtonText: {
+    fontSize: s(13),
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

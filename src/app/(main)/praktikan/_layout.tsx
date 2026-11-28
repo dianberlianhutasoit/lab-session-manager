@@ -9,8 +9,9 @@ export default function PraktikanLayout() {
         headerTitleStyle: { fontWeight: "bold" },
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Jadwal Praktikum" }} />
-      <Stack.Screen name="[id]" options={{ title: "Detail Praktikum" }} />
+      <Stack.Screen name="index" options={{ title: "Beranda Praktikan", headerShown: false }} />
+      <Stack.Screen name="jadwal" options={{ title: "Jadwal Praktikum", headerShown: false }} />
+      <Stack.Screen name="[id]" options={{ title: "Detail Praktikum", headerShown: false }} />
       <Stack.Screen name="riwayat" options={{ title: "Riwayat Kehadiran" }} />
     </Stack>
   );
