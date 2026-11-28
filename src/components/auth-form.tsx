@@ -1,4 +1,4 @@
-import { Link, useRouter, type Href } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -40,6 +40,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     status,
   } = useAuth();
 
+  const [activeMode, setActiveMode] = useState<'login' | 'register' | null>(null);
+  const currentMode = activeMode ?? mode;
+  const isRegister = currentMode === 'register';
+
   const [name, setName] = useState('');
   const [nim, setNim] = useState('');
   const [email, setEmail] = useState('');
@@ -50,7 +54,6 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const isRegister = mode === 'register';
   const profilePending = status === 'needsProfile' || status === 'profileError';
 
   const submit = async () => {
@@ -110,10 +113,13 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         pointerEvents="none"
       />
 
-      {/* 2. Lingkaran Abstrak Kiri Tengah (Mid-Left Asset behind mascot) */}
+      {/* 2. Lingkaran Abstrak Kiri Tengah (Mid-Left Asset) */}
       <Image
         source={require('@/assets/images/lingkaran_kiri_tengah.png')}
-        style={styles.lingkaranKiriTengah}
+        style={[
+          styles.lingkaranKiriTengah,
+          isRegister && styles.lingkaranKiriTengahRegister,
+        ]}
         resizeMode="contain"
         pointerEvents="none"
       />
@@ -123,43 +129,64 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isRegister && styles.scrollContentRegister,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          {/* ================= HEADER: Maskot & Logo ================= */}
-          <View style={styles.headerArea}>
-            {/* Mascot Singa (maskot_labora_login.png) */}
-            <View style={styles.mascotContainer} pointerEvents="none">
-              <Image
-                source={require('@/assets/images/maskot_labora_login.png')}
-                style={styles.mascotImage}
-                resizeMode="contain"
-              />
+          {/* ================= HEADER SECTION ================= */}
+          {isRegister ? (
+            /* Register Mode Header: Logo centered, no mascot, 2x larger */
+            <View style={styles.headerAreaRegister}>
+              <View style={styles.logoGroupCentered}>
+                <Image
+                  source={require('@/assets/images/logo_labora.png')}
+                  style={styles.logoIconRegister}
+                  resizeMode="contain"
+                />
+              </View>
             </View>
+          ) : (
+            /* Login Mode Header: Exact layout from commit ccf325f */
+            <View style={styles.headerArea}>
+              <View style={styles.mascotContainer} pointerEvents="none">
+                <Image
+                  source={require('@/assets/images/maskot_labora_login.png')}
+                  style={styles.mascotImage}
+                  resizeMode="contain"
+                />
+              </View>
 
-            {/* Logo Labora & Typography (logo_labora.png) */}
-            <View style={styles.logoGroup}>
-              <Image
-                source={require('@/assets/images/logo_labora.png')}
-                style={styles.logoIcon}
-                resizeMode="contain"
-              />
+              <View style={styles.logoGroup}>
+                <Image
+                  source={require('@/assets/images/logo_labora.png')}
+                  style={styles.logoIcon}
+                  resizeMode="contain"
+                />
+              </View>
             </View>
-          </View>
+          )}
 
-          {/* ================= LOGIN SECTION: White Rounded Card ================= */}
-          <View style={styles.loginCard}>
-            {/* Title: Hai, Laborans! */}
-            <Text style={styles.greetingTitle}>Hai, Laborans!</Text>
+          {/* ================= CARD SECTION: White Rounded Card ================= */}
+          <View style={[styles.loginCard, isRegister && styles.registerCard]}>
+            {/* Title */}
+            <Text style={[styles.greetingTitle, isRegister && styles.greetingTitleRegister]}>
+              {isRegister
+                ? 'Registrasi Akun'
+                : profilePending
+                ? 'Lengkapi Profil'
+                : 'Hai, Laborans!'}
+            </Text>
 
             {/* Subtitle */}
-            <Text style={styles.greetingSubtitle}>
-              {profilePending
+            <Text style={[styles.greetingSubtitle, isRegister && styles.greetingSubtitleRegister]}>
+              {isRegister
+                ? 'Silakan lengkapi data Anda di bawah ini untuk mendaftar'
+                : profilePending
                 ? 'Lengkapi data identitas Anda untuk mengaktifkan akun.'
-                : isRegister
-                ? 'Silakan buat akun baru untuk mengakses laboratorium Anda'
                 : 'Silakan masuk atau buat akun baru untuk mengakses laboratorium Anda'}
             </Text>
 
@@ -173,7 +200,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
             {/* Field: Nama Lengkap (Register / Profile Pending) */}
             {(isRegister || profilePending) && (
-              <View style={styles.inputContainer}>
+              <View style={[styles.inputContainer, isRegister && styles.inputContainerRegister]}>
                 <Ionicons name="person" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
                   style={styles.inputField}
@@ -188,11 +215,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
 
             {/* Field: NIM (Register / Profile Pending) */}
             {(isRegister || profilePending) && (
-              <View style={styles.inputContainer}>
-                <Ionicons name="card" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
+              <View style={[styles.inputContainer, isRegister && styles.inputContainerRegister]}>
+                <Ionicons name="id-card" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
                   style={styles.inputField}
-                  placeholder="Nomor Induk Mahasiswa (NIM)"
+                  placeholder="NIM"
                   placeholderTextColor={COLOR_PLACEHOLDER}
                   value={nim}
                   onChangeText={setNim}
@@ -202,8 +229,23 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </View>
             )}
 
-            {/* Field: Username / Email */}
-            {!profilePending && (
+            {/* Field: Email / Username */}
+            {isRegister ? (
+              /* Email for Register */
+              <View style={[styles.inputContainer, styles.inputContainerRegister]}>
+                <Ionicons name="mail" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.inputField}
+                  placeholder="Email"
+                  placeholderTextColor={COLOR_PLACEHOLDER}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
+            ) : !profilePending ? (
+              /* Username/Email for Login */
               <View style={styles.inputContainer}>
                 <Ionicons name="person" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
@@ -216,11 +258,11 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   keyboardType="email-address"
                 />
               </View>
-            )}
+            ) : null}
 
-            {/* Field: Password */}
+            {/* Field: Kata Sandi */}
             {!profilePending && (
-              <View style={styles.inputContainer}>
+              <View style={[styles.inputContainer, isRegister && styles.inputContainerRegister]}>
                 <Ionicons name="lock-closed" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
                   style={styles.inputField}
@@ -245,10 +287,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </View>
             )}
 
-            {/* Field: Konfirmasi Password (Register) */}
+            {/* Field: Konfirmasi Kata Sandi (Register) */}
             {isRegister && (
-              <View style={styles.inputContainer}>
-                <Ionicons name="checkmark-circle" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
+              <View style={[styles.inputContainer, styles.inputContainerRegister]}>
+                <Ionicons name="lock-closed" size={20} color={COLOR_MAROON} style={styles.inputIcon} />
                 <TextInput
                   style={styles.inputField}
                   placeholder="Konfirmasi Kata Sandi"
@@ -272,7 +314,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </View>
             )}
 
-            {/* Lupa Kata Sandi? */}
+            {/* Lupa Kata Sandi? (Login only) */}
             {!isRegister && !profilePending && (
               <TouchableOpacity
                 onPress={handleForgotPassword}
@@ -283,9 +325,13 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               </TouchableOpacity>
             )}
 
-            {/* Tombol MASUK (Pill Button) */}
+            {/* Tombol DAFTAR / MASUK (Pill Button) */}
             <TouchableOpacity
-              style={[styles.loginButton, busy && { opacity: 0.75 }]}
+              style={[
+                styles.loginButton,
+                isRegister && styles.registerButton,
+                busy && { opacity: 0.75 },
+              ]}
               onPress={submit}
               disabled={busy}
               activeOpacity={0.85}
@@ -299,22 +345,38 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               )}
             </TouchableOpacity>
 
-            {/* Belum punya akun? Daftar Sekarang */}
+            {/* Switch Mode Footer */}
             <View style={styles.switchAuthRow}>
               {isRegister ? (
-                <Text style={styles.switchAuthPrompt}>
-                  Sudah punya akun?{' '}
-                  <Link href={'/login' as Href} style={styles.switchAuthHighlight}>
-                    Masuk Sekarang
-                  </Link>
-                </Text>
+                <View style={styles.switchPromptContainer}>
+                  <Text style={styles.switchAuthPrompt}>Sudah punya akun? </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setError('');
+                      setActiveMode('login');
+                      router.push('/login' as Href);
+                    }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.switchAuthHighlight}>Masuk Sekarang</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
-                <Text style={styles.switchAuthPrompt}>
-                  Belum punya akun?{' '}
-                  <Link href={'/register' as Href} style={styles.switchAuthHighlight}>
-                    Daftar Sekarang
-                  </Link>
-                </Text>
+                <View style={styles.switchPromptContainer}>
+                  <Text style={styles.switchAuthPrompt}>Belum punya akun? </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setError('');
+                      setActiveMode('register');
+                      router.push('/register' as Href);
+                    }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.switchAuthHighlight}>Daftar Sekarang</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -347,6 +409,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'flex-end',
   },
+  scrollContentRegister: {
+    flexGrow: 1,
+    justifyContent: 'flex-start',
+    paddingBottom: 0,
+  },
 
   /* ================= FIGMA ABSTRACT IMAGE ASSETS ================= */
   lingkaranUjungKanan: {
@@ -365,6 +432,9 @@ const styles = StyleSheet.create({
     height: s(220),
     zIndex: 1,
   },
+  lingkaranKiriTengahRegister: {
+    top: s(115), // Disesuaikan dengan posisi header register baru
+  },
   lingkaranUjungKiri: {
     position: 'absolute',
     bottom: 0,
@@ -374,7 +444,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
-  /* ================= HEADER: MASCOT & LOGO ================= */
+  /* ================= HEADER: LOGIN MODE (Exact from commit ccf325f) ================= */
   headerArea: {
     height: s(345),
     width: '100%',
@@ -407,8 +477,35 @@ const styles = StyleSheet.create({
     height: s(130),
     marginBottom: s(-15),
   },
-  subLaboraText: {
-    fontSize: s(9.5),
+
+  /* ================= HEADER: REGISTER MODE (Logo centered, 2x larger, no mascot) ================= */
+  headerAreaRegister: {
+    height: s(255),
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? s(35) : s(24),
+    zIndex: 3,
+  },
+  logoGroupCentered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoIconRegister: {
+    width: s(150),
+    height: s(150),
+    marginBottom: s(2),
+  },
+  laboraTextRegister: {
+    fontSize: s(34),
+    fontWeight: '700',
+    color: '#791535',
+    lineHeight: s(40),
+    letterSpacing: 2,
+    textAlign: 'center',
+  },
+  subLaboraTextRegister: {
+    fontSize: s(10),
     fontWeight: '400',
     color: '#000000',
     textAlign: 'center',
@@ -416,7 +513,7 @@ const styles = StyleSheet.create({
     marginTop: s(1),
   },
 
-  /* ================= LOGIN SECTION: WHITE CARD ================= */
+  /* ================= CARD SECTION: WHITE CARD ================= */
   loginCard: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 30,
@@ -425,13 +522,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(22),
     paddingTop: s(20),
     paddingBottom: Platform.OS === 'ios' ? s(38) : s(28),
-    minHeight: SCREEN_HEIGHT * 0.90,
+    minHeight: SCREEN_HEIGHT * 0.90, // Exact from commit ccf325f for login
     zIndex: 4,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
     elevation: 8,
+  },
+  registerCard: {
+    flex: 1,
+    minHeight: SCREEN_HEIGHT - s(245),
+    paddingTop: s(10),
+    paddingBottom: Platform.OS === 'ios' ? s(40) : s(28),
+    marginTop: 0,
   },
   greetingTitle: {
     fontSize: s(34),
@@ -441,6 +545,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: s(6),
   },
+  greetingTitleRegister: {
+    fontSize: s(28),
+    lineHeight: s(40),
+    marginBottom: s(2),
+  },
   greetingSubtitle: {
     fontSize: s(15.5),
     fontWeight: '500',
@@ -449,6 +558,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: s(12),
     marginBottom: s(24),
+  },
+  greetingSubtitleRegister: {
+    fontSize: s(13.5),
+    lineHeight: s(17),
+    marginBottom: s(14),
   },
 
   errorBox: {
@@ -477,6 +591,10 @@ const styles = StyleSheet.create({
     height: s(50),
     paddingHorizontal: s(14),
     marginBottom: s(14),
+  },
+  inputContainerRegister: {
+    height: s(50),
+    marginBottom: s(9),
   },
   inputIcon: {
     marginRight: s(12),
@@ -520,6 +638,11 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 3,
   },
+  registerButton: {
+    height: s(50),
+    marginTop: s(20),
+    marginBottom: s(12),
+  },
   loginButtonText: {
     fontSize: s(16),
     fontWeight: '700',
@@ -533,6 +656,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: s(4),
+  },
+  switchPromptContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   switchAuthPrompt: {
     fontSize: s(15),
