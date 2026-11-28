@@ -5,5 +5,5 @@ export default function AuthLayout() {
   const { status } = useAuth();
   if (status === 'loading') return null;
   if (status === 'authenticated') return <Redirect href={'/' as Href} />;
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return <Stack screenOptions={{ headerShown: false, animation: 'none' }} />;
 }

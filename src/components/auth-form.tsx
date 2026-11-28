@@ -42,9 +42,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     status,
   } = useAuth();
 
-  const [activeMode, setActiveMode] = useState<'login' | 'register' | null>(null);
-  const currentMode = activeMode ?? mode;
-  const isRegister = currentMode === 'register';
+  const isRegister = mode === 'register';
 
   const [name, setName] = useState('');
   const [nim, setNim] = useState('');
@@ -400,9 +398,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   <Text style={styles.switchAuthPrompt}>Sudah punya akun? </Text>
                   <TouchableOpacity
                     onPress={() => {
+                      Keyboard.dismiss();
                       setError('');
-                      setActiveMode('login');
-                      router.push('/login' as Href);
+                      router.replace('/login' as Href);
                     }}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     activeOpacity={0.7}
@@ -415,9 +413,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   <Text style={styles.switchAuthPrompt}>Belum punya akun? </Text>
                   <TouchableOpacity
                     onPress={() => {
+                      Keyboard.dismiss();
                       setError('');
-                      setActiveMode('register');
-                      router.push('/register' as Href);
+                      router.replace('/register' as Href);
                     }}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     activeOpacity={0.7}
