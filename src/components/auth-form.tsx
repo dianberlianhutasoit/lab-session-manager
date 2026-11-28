@@ -1,10 +1,12 @@
 import { useRouter, type Href } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -53,6 +55,37 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [translateY] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardVisible(true);
+      const shiftValue = isRegister ? -s(185) : -s(145);
+      Animated.timing(translateY, {
+        toValue: shiftValue,
+        duration: Platform.OS === 'ios' ? (e?.duration ?? 250) : 220,
+        useNativeDriver: true,
+      }).start();
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, (e) => {
+      setKeyboardVisible(false);
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: Platform.OS === 'ios' ? (e?.duration ?? 250) : 220,
+        useNativeDriver: true,
+      }).start();
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [isRegister, translateY]);
 
   const profilePending = status === 'needsProfile' || status === 'profileError';
 
@@ -135,12 +168,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          scrollEnabled={keyboardVisible}
           bounces={false}
         >
-          {/* ================= HEADER SECTION ================= */}
+          {/* ================= HEADER SECTION: Stays in place (does NOT move) ================= */}
           {isRegister ? (
             /* Register Mode Header: Logo centered, no mascot, 2x larger */
-            <View style={styles.headerAreaRegister}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={Keyboard.dismiss}
+              style={styles.headerAreaRegister}
+            >
               <View style={styles.logoGroupCentered}>
                 <Image
                   source={require('@/assets/images/logo_labora.png')}
@@ -148,10 +186,14 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   resizeMode="contain"
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ) : (
             /* Login Mode Header: Exact layout from commit ccf325f */
-            <View style={styles.headerArea}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={Keyboard.dismiss}
+              style={styles.headerArea}
+            >
               <View style={styles.mascotContainer} pointerEvents="none">
                 <Image
                   source={require('@/assets/images/maskot_labora_login.png')}
@@ -167,11 +209,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                   resizeMode="contain"
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           )}
 
-          {/* ================= CARD SECTION: White Rounded Card ================= */}
-          <View style={[styles.loginCard, isRegister && styles.registerCard]}>
+          {/* ================= CARD SECTION: Only the Card and its contents slide up ================= */}
+          <Animated.View
+            style={[
+              styles.loginCard,
+              isRegister && styles.registerCard,
+              { transform: [{ translateY }] },
+            ]}
+          >
             {/* Title */}
             <Text style={[styles.greetingTitle, isRegister && styles.greetingTitleRegister]}>
               {isRegister
@@ -379,7 +427,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
                 </View>
               )}
             </View>
-          </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -640,7 +688,7 @@ const styles = StyleSheet.create({
   },
   registerButton: {
     height: s(50),
-    marginTop: s(20),
+    marginTop: s(40),
     marginBottom: s(12),
   },
   loginButtonText: {
